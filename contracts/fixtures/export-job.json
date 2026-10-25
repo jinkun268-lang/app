@@ -1,0 +1,16 @@
+{
+  "export_id": "0199b0e1-2a3c-7d4f-8b5a-9c0d1e2f3a4b",
+  "format": "dataset",
+  "status": "succeeded",
+  "filters": { "uploaded_from": null, "uploaded_to": null, "final_cultivar_id": null, "final_class_id": null, "format": "dataset" },
+  "snapshot_at": "2026-10-20T02:00:00Z",
+  "taxonomy_version": 1,
+  "item_count": 2,
+  "zip_sha256": "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+  "zip_size": 2048,
+  "error_code": null,
+  "error_detail": null,
+  "created_at": "2026-10-20T02:00:00Z",
+  "started_at": "2026-10-20T02:00:01Z",
+  "finished_at": "2026-10-20T02:01:12Z"
+}

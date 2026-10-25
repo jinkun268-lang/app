@@ -1,0 +1,118 @@
+# 跨端枚举单一来源（contract_version: 2.0.0）
+# 机器可读值一律小写 snake_case；显示名在客户端映射，不进入本文件。
+
+version: 2.0.0
+
+roles:
+  # 完整业务角色；四种角色均可登录，权限由具体工作区与接口限定
+  - collector
+  - admin
+  - super_admin
+  - expert
+
+admin_role:
+  # 训练准备管理角色；不是 Web 登录角色白名单
+  - admin
+  - super_admin
+
+review_status:
+  - unreviewed
+  - confirmed
+  - corrected
+  - unresolved
+
+quality_status:
+  - pending
+  - usable
+  - unusable
+
+quality_reason_code:
+  - blur
+  - occluded
+  - exposure
+  - wrong_object
+  - duplicate
+  - other
+
+view_type:
+  - close_up
+  - context
+  - other
+
+part:
+  - leaf
+  - fruit
+  - branch
+  - insect
+  - other
+
+receive_status:
+  - missing
+  - received
+  - invalid
+
+upload_state:
+  - receiving
+  - complete
+
+export_status:
+  - queued
+  - running
+  - succeeded
+  - failed
+
+task_status:
+  - queued
+  - running
+  - succeeded
+  - failed
+  - dead
+
+question_status:
+  - processing
+  - auto_answered
+  - queued
+  - reviewing
+  - needs_info
+  - expert_answered
+  - expert_unresolved
+  - answer_failed
+
+ticket_status:
+  - queued
+  - reviewing
+  - needs_info
+  - done
+
+ticket_outcome:
+  - answered
+  - unresolved
+
+answer_source:
+  - auto
+  - expert
+
+confidence_band:
+  - high
+  - medium
+  - low
+  - unknown
+
+routing_reason_code:
+  - evidence_sufficient
+  - insufficient_evidence
+  - out_of_scope
+  - conflict
+  - low_confidence
+  - model_unavailable
+  - policy_force_expert
+
+attachment_usage:
+  - question
+
+reserved_codes:
+  # 保留业务码，不进入默认导出
+  unknown: "仅类别/品种，显式选择非空值"
+  other: "仅部位"
+
+placeholder_code_pattern: "^tmp_[a-z0-9_]{2,28}$"

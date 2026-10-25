@@ -1,0 +1,27 @@
+# 夹具清单：lint_contract.py 按此映射校验 JSON 与对应 OpenAPI Schema 一致
+# schema 为 openapi.yaml 中 components/schemas 下的键名
+# contract_version 2.0.0 起夹具不再包含 orchard 字段；非果园场景全部保留。
+entries:
+  - file: sample-detail.json
+    schema: SampleDetail
+  - file: sample-summary-page.json
+    schema: SampleSummaryPage
+  - file: sample-review-request.json
+    schema: SampleReviewRequest
+  - file: error-version-conflict.json
+    schema: ErrorResponse
+  - file: bootstrap.json
+    schema: BootstrapResponse
+  - file: me.json
+    schema: MeResponse
+  - file: export-job.json
+    schema: ExportJob
+  # 采集上传四步协议：声明 / 接收状态 / 单图收据 / 完成回执
+  - file: upload-declare-request.json
+    schema: UploadDeclareRequest
+  - file: upload-status.json
+    schema: UploadStatus
+  - file: upload-image-receipt.json
+    schema: UploadImageReceipt
+  - file: upload-complete-response.json
+    schema: UploadCompleteResponse

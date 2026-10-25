@@ -1,0 +1,36 @@
+{
+  "sample_id": "0199a1f0-7c3e-7b1a-9d2f-2a5c8e1b4d60",
+  "schema_version": 1,
+  "tree_id": "T-001",
+  "cultivar_id": "huyou",
+  "part": "leaf",
+  "class_id": "unknown",
+  "symptoms": "叶片出现黄斑",
+  "note": null,
+  "images": [
+    {
+      "image_id": "0199a1f1-1d2c-7c33-8a44-6f7b8c9d0e11",
+      "view_type": "close_up",
+      "captured_at": "2026-10-20T09:12:33+08:00",
+      "device_timezone": "Asia/Shanghai",
+      "device_model": "Pixel 8",
+      "mime_type": "image/jpeg",
+      "width": 3000,
+      "height": 4000,
+      "file_size": 1843200,
+      "sha256": "3f786850e387550fdab836ed7e6dc881de23001b1f9b0d8ff1b1b3ce5b6b0f0f"
+    },
+    {
+      "image_id": "0199a1f1-2a45-7d10-9b6c-3d4e5f607182",
+      "view_type": "context",
+      "captured_at": "2026-10-20T09:13:05+08:00",
+      "device_timezone": "Asia/Shanghai",
+      "device_model": null,
+      "mime_type": "image/jpeg",
+      "width": 4000,
+      "height": 3000,
+      "file_size": 902144,
+      "sha256": "9c1185a5c5e9fc54612808977ee8f548b2258d31ddad0d0b4f0a4b7e2c9d1c4a"
+    }
+  ]
+}

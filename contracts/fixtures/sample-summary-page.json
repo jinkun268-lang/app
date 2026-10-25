@@ -1,0 +1,45 @@
+{
+  "items": [
+    {
+      "sample_id": "0199a1f0-7c3e-7b1a-9d2f-2a5c8e1b4d60",
+      "tree_id": "T-001",
+      "original_cultivar_id": "huyou",
+      "original_cultivar_name": "胡柚",
+      "original_part": "leaf",
+      "original_class_id": "unknown",
+      "original_class_name": "不确定",
+      "final_cultivar_id": null,
+      "final_cultivar_name": null,
+      "final_part": null,
+      "final_class_id": null,
+      "final_class_name": null,
+      "review_status": "unreviewed",
+      "excluded": false,
+      "upload_completed_at": "2026-10-20T01:22:10Z",
+      "image_count": 2,
+      "first_image_id": "0199a1f1-1d2c-7c33-8a44-6f7b8c9d0e11"
+    },
+    {
+      "sample_id": "0199a1f2-5b6d-7e21-9c3a-1d2e3f4a5b6c",
+      "tree_id": null,
+      "original_cultivar_id": "xiangyou",
+      "original_cultivar_name": "香柚",
+      "original_part": "fruit",
+      "original_class_id": "unknown",
+      "original_class_name": "不确定",
+      "final_cultivar_id": "xiangyou",
+      "final_cultivar_name": "香柚",
+      "final_part": "fruit",
+      "final_class_id": "citrus_canker",
+      "final_class_name": "溃疡病",
+      "review_status": "corrected",
+      "excluded": false,
+      "upload_completed_at": "2026-10-19T08:40:02Z",
+      "image_count": 1,
+      "first_image_id": null
+    }
+  ],
+  "page": 1,
+  "page_size": 20,
+  "total": 2
+}

@@ -1,0 +1,15 @@
+# 服务端运行依赖（版本下限按接口需要，安装时按项目需要锁定具体版本）
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+httpx>=0.27
+Pillow>=10
+pytest>=8
+PyYAML>=6
+jsonschema>=4
+
+# 元数据存储：默认 SQLite（标准库），测试可用 MySQL，生产推荐 PostgreSQL。
+SQLAlchemy>=2,<3
+PyMySQL>=1.1,<2
+psycopg[binary]>=3,<4
+# MySQL 8 默认 caching_sha2_password 认证需要 cryptography。
+cryptography>=42

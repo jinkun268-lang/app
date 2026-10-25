@@ -1,0 +1,14 @@
+{
+  "cultivars": [
+    { "cultivar_id": "huyou", "name": "胡柚", "is_active": true, "version": 1 },
+    { "cultivar_id": "xiangyou", "name": "香柚", "is_active": true, "version": 1 },
+    { "cultivar_id": "unknown", "name": "不确定", "is_active": true, "version": 1 }
+  ],
+  "classes": [
+    { "class_id": "unknown", "name": "不确定", "parent_id": null, "is_active": true, "is_provisional": false, "introduced_taxonomy_version": 1, "deprecated_taxonomy_version": null, "version": 1 },
+    { "class_id": "tmp_citrus_hlb", "name": "黄龙病（占位）", "parent_id": null, "is_active": true, "is_provisional": true, "introduced_taxonomy_version": 1, "deprecated_taxonomy_version": null, "version": 1 }
+  ],
+  "taxonomy_version": 1,
+  "policy_version": 1,
+  "server_time": "2026-10-20T02:00:00Z"
+}

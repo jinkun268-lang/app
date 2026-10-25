@@ -1,0 +1,19 @@
+# Standalone instance; do not run another Nginx on the same 80/443 listeners.
+# Generate nginx.conf under /var/lib/citrus-gateway first. Adjust binary path.
+[Unit]
+Description=Citrus application Nginx gateway
+After=network.target
+
+[Service]
+Type=forking
+PIDFile=/var/lib/citrus-gateway/logs/nginx.pid
+ExecStartPre=/usr/sbin/nginx -p /var/lib/citrus-gateway/ -c nginx.conf -t
+ExecStart=/usr/sbin/nginx -p /var/lib/citrus-gateway/ -c nginx.conf
+ExecReload=/usr/sbin/nginx -p /var/lib/citrus-gateway/ -c nginx.conf -t
+ExecReload=/usr/sbin/nginx -p /var/lib/citrus-gateway/ -c nginx.conf -s reload
+ExecStop=/usr/sbin/nginx -p /var/lib/citrus-gateway/ -c nginx.conf -s quit
+Restart=on-failure
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

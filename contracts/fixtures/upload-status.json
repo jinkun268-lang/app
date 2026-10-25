@@ -1,0 +1,9 @@
+{
+  "upload_id": "0199a1f2-3b4c-7d5e-8f60-718293a4b5c6",
+  "sample_id": "0199a1f0-7c3e-7b1a-9d2f-2a5c8e1b4d60",
+  "state": "receiving",
+  "declared_at": "2026-10-20T01:20:02Z",
+  "received_images": ["0199a1f1-1d2c-7c33-8a44-6f7b8c9d0e11"],
+  "missing_images": ["0199a1f1-2a45-7d10-9b6c-3d4e5f607182"],
+  "invalid_images": []
+}
