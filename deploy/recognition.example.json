@@ -1,0 +1,12 @@
+{
+  "architecture": "efficientnet_b0",
+  "name": "实验叶片五分类 EfficientNet-B0",
+  "weights": "D:/models/best_efficientnet_b0.pt",
+  "classes": [
+    {"label": "black_spot", "name": "黑斑（模型标签）", "class_id": null},
+    {"label": "canker", "name": "溃疡病", "class_id": "citrus_canker"},
+    {"label": "greening", "name": "黄龙病（模型标签）", "class_id": null},
+    {"label": "healthy", "name": "健康（模型标签）", "class_id": null},
+    {"label": "melanose", "name": "黑点（模型标签）", "class_id": null}
+  ]
+}

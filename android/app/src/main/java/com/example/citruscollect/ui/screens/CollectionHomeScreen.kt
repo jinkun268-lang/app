@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,7 +23,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun CollectionHomeScreen(
-    onStartCapture: (String) -> Unit,
+    onStartCapture: () -> Unit,
     onOpenUploads: () -> Unit
 ) {
     val container = LocalAppContainer.current
@@ -37,19 +38,16 @@ fun CollectionHomeScreen(
         Text("待上传：$pendingCount")
         Spacer(Modifier.height(24.dp))
         Button(
-            onClick = {
-                scope.launch {
-                    val id = container.repository.createSample("unknown", "leaf", "unknown")
-                    onStartCapture(id)
-                }
-            },
+            onClick = onStartCapture,
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("开始采集")
         }
+        Text("每张照片独立成条，可分别编辑、上传、撤回", Modifier.padding(top = 8.dp),
+            style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(12.dp))
         OutlinedButton(onClick = onOpenUploads, modifier = Modifier.fillMaxWidth()) {
-            Text("查看待上传")
+            Text("上传记录")
         }
         Spacer(Modifier.height(12.dp))
         OutlinedButton(

@@ -152,6 +152,39 @@ def read_csv(data: bytes) -> list[list[str]]:
 
 # ---------------- 主闭环 ----------------
 
+@pytest.mark.parametrize("backend", ["memory", "sqlite"])
+def test_withdrawal_hides_samples_and_new_exports_but_preserves_history(tmp_path, backend):
+    url = "memory" if backend == "memory" else f"sqlite+pysqlite:///{(tmp_path / 'withdraw.sqlite3').as_posix()}"
+    with TestClient(create_app(url, storage_root=tmp_path / "files")) as test_client:
+        info = upload_two_images(test_client)
+        admin = login(test_client, "admin")
+        expert = login(test_client, "expert")
+        other = login(test_client, "collector2")
+        sample_id = info["sample_id"]
+        review_and_qualify(test_client, admin, info)
+        before = test_client.post(f"{BASE}/exports", json={"format": "dataset"},
+            headers={**bearer(admin), "Idempotency-Key": new_uuid7()})
+        assert before.status_code == 202, before.text
+        export = wait_export(test_client, admin, before.json()["export_id"])
+        assert export["item_count"] == 1
+        endpoint = f"{BASE}/samples/{sample_id}/withdraw"
+        assert test_client.post(endpoint, headers=bearer(other)).status_code == 404
+        assert test_client.post(endpoint, headers=bearer(admin)).status_code == 403
+        first = test_client.post(endpoint, headers=bearer(info["owner"]))
+        assert first.status_code == 200, first.text
+        assert test_client.post(endpoint, headers=bearer(info["owner"])).json() == first.json()
+        assert test_client.get(f"{BASE}/samples", headers=bearer(admin)).json()["total"] == 0
+        assert test_client.get(f"{BASE}/samples/{sample_id}", headers=bearer(admin)).status_code == 404
+        assert test_client.get(f"{BASE}/media/sample-images/{info['a']['image_id']}", headers=bearer(admin)).status_code == 404
+        assert test_client.post(f"{BASE}/uploads/{info['upload_id']}/complete", headers=bearer(info["owner"])).status_code == 409
+        assert test_client.patch(f"{BASE}/samples/{sample_id}/review", json={"expected_version": 2, "review_status": "confirmed"}, headers=bearer(expert)).status_code == 409
+        after = test_client.post(f"{BASE}/exports", json={"format": "dataset"},
+            headers={**bearer(admin), "Idempotency-Key": new_uuid7()})
+        assert after.status_code == 202, after.text
+        assert wait_export(test_client, admin, after.json()["export_id"])["item_count"] == 0
+        assert test_client.get(f"{BASE}/exports/{export['export_id']}/download", headers=bearer(admin)).status_code == 200
+
+
 def test_review_then_export_only_usable_image(client: TestClient):
     info = upload_two_images(client)
     admin = login(client, "admin")

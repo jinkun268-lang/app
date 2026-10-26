@@ -47,7 +47,6 @@ class ClientUiChainTest {
         assertTrue("Real login", device.wait(Until.hasObject(By.text("开始采集")), 30000))
         device.findObject(By.text("开始采集")).click()
         assertTrue("Capture screen", device.wait(Until.hasObject(By.text("完成拍摄")), 15000))
-        val sample = runBlocking { app.container.repository.observePending().first { list -> list.any { it.sampleId !in oldIds } }.first { it.sampleId !in oldIds } }
         // CameraX asynchronously binds its surface after the screen appears.
         assertTrue("Camera ready", device.wait(Until.hasObject(By.text("相机已就绪")), 30000))
         device.dumpWindowHierarchy(File(context.getExternalFilesDir(null), "client-before-shutter.xml"))
@@ -57,13 +56,14 @@ class ClientUiChainTest {
         val saved = device.wait(Until.hasObject(By.text("拍摄（已拍 1 张）")), 30000)
         device.dumpWindowHierarchy(File(context.getExternalFilesDir(null), "client-after-shutter.xml"))
         assertTrue("CameraX saved photo to Room", saved)
+        val sample = runBlocking { app.container.repository.observePending().first { list -> list.any { it.sampleId !in oldIds } }.first { it.sampleId !in oldIds } }
         device.findObject(By.text("完成拍摄")).click()
-        assertTrue("Confirmation", device.wait(Until.hasObject(By.text("信息确认")), 10000))
+        assertTrue("Confirmation", device.wait(Until.hasObject(By.text("编辑图片")), 10000))
         assertTrue("Bootstrap dictionary", device.wait(Until.hasObject(By.text("胡柚")), 20000))
-        if (!device.hasObject(By.text("保存并结束"))) {
-            UiScrollable(UiSelector().scrollable(true)).scrollIntoView(UiSelector().text("保存并结束"))
+        if (!device.hasObject(By.text("保存信息"))) {
+            UiScrollable(UiSelector().scrollable(true)).scrollIntoView(UiSelector().text("保存信息"))
         }
-        device.findObject(By.text("保存并结束")).click()
+        device.findObject(By.text("保存信息")).click()
         assertTrue("Upload queue", device.wait(Until.hasObject(By.text("上传")), 10000))
         device.findObject(By.text("上传")).click()
         assertTrue("Server completion receipt", device.wait(Until.hasObject(By.textStartsWith("上传完成：")), 60000))

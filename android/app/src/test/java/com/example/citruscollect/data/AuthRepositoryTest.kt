@@ -25,6 +25,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 class FakeSessionStore : SessionStore {
+    private val bootstrapCache = mutableMapOf<String, String>()
+    override suspend fun loadBootstrapCache(key: String): String? = bootstrapCache[key]
+    override suspend fun saveBootstrapCache(key: String, value: String) { bootstrapCache[key] = value }
     private val _token = MutableStateFlow<String?>(null)
     private val _username = MutableStateFlow<String?>(null)
     private val _role = MutableStateFlow<String?>(null)
@@ -65,6 +68,7 @@ class FakeSessionStore : SessionStore {
     }
 
     override suspend fun clear() {
+        bootstrapCache.clear()
         access = null
         refresh = null
         _token.value = null
@@ -72,6 +76,49 @@ class FakeSessionStore : SessionStore {
 }
 
 class AuthRepositoryTest {
+    private fun bootstrapJson(version: Int = 1) = """{"cultivars":[{"cultivar_id":"unknown","name":"不确定","is_active":true,"version":1}],"classes":[],"taxonomy_version":$version,"policy_version":1,"server_time":"2026-10-25T12:00:00Z"}"""
+
+    @Test fun bootstrapCachesPersistsAndUsesCachedDataOnTransientFailure() = runBlocking {
+        server.enqueue(json(200, loginResponse("collector")))
+        repository.login(server.url("/").toString(), "c1", "password")
+        server.enqueue(json(200, bootstrapJson()))
+        assertEquals(1, repository.bootstrap().taxonomy_version)
+        assertEquals(1, repository.bootstrap().taxonomy_version)
+        val restored = AuthRepository(Backend(), session)
+        assertEquals(1, restored.bootstrap().taxonomy_version)
+        assertEquals(2, server.requestCount)
+        server.enqueue(json(503, "{}"))
+        assertEquals(1, restored.bootstrap(forceRefresh = true).taxonomy_version)
+        server.enqueue(json(200, bootstrapJson(2)))
+        assertEquals(2, restored.bootstrap(forceRefresh = true).taxonomy_version)
+        assertEquals(2, restored.bootstrap().taxonomy_version)
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test fun bootstrapCacheCannotCrossServerAndDoesNotHideAuthRejection() = runBlocking {
+        server.enqueue(json(200, loginResponse("collector")))
+        repository.login(server.url("/").toString(), "c1", "password")
+        server.enqueue(json(200, bootstrapJson()))
+        assertEquals(1, repository.bootstrap().taxonomy_version)
+        other.enqueue(json(200, loginResponse("collector")))
+        repository.login(other.url("/").toString(), "c1", "password")
+        other.enqueue(json(200, bootstrapJson(9)))
+        assertEquals(9, repository.bootstrap().taxonomy_version)
+        other.enqueue(json(401, """{"error":{"code":"AUTH_INVALID","message":"revoked","details":{"reason":"revoked"}}}"""))
+        var rejected = false
+        try { repository.bootstrap(forceRefresh = true) } catch (_: HttpException) { rejected = true }
+        assertTrue(rejected)
+        assertNull(session.access)
+    }
+
+    @Test fun bootstrapSafelyRetriesDroppedReadConnection() = runBlocking {
+        server.enqueue(json(200, loginResponse("collector")))
+        repository.login(server.url("/").toString(), "c1", "password")
+        server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        server.enqueue(json(200, bootstrapJson(3)))
+        assertEquals(3, repository.bootstrap().taxonomy_version)
+        assertEquals(3, server.requestCount)
+    }
     private lateinit var server: MockWebServer
     private lateinit var other: MockWebServer
     private lateinit var session: FakeSessionStore

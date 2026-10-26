@@ -27,5 +27,6 @@ data class ImageEntity(
     val height: Int,
     val fileSize: Long,
     val sha256: String = "",
-    val capturedAt: Long = System.currentTimeMillis()
+    val capturedAt: Long = System.currentTimeMillis(),
+    val recognitionJson: String? = null
 )

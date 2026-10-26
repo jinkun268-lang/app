@@ -276,6 +276,9 @@ def _owned_upload(store: DataTransaction, upload_id: str, user: dict[str, Any]) 
         raise DomainError(404, "NOT_FOUND", _NOT_FOUND)
     if upload["owner_id"] != user["user_id"]:
         raise DomainError(404, "NOT_FOUND", _NOT_FOUND)
+    sample = store.get_sample(upload["sample_id"])
+    if sample is not None and sample["upload_state"] == "withdrawn":
+        raise DomainError(409, "STATE_CONFLICT", "该记录已撤回，请作为新记录重新上传")
     return upload
 
 
@@ -579,6 +582,8 @@ def _declare_received(storage, user, raw):
             if existing_sample["owner_id"] != user["user_id"]:
                 # 不泄露图片信息，也不暴露已有会话内容。
                 raise DomainError(403, "FORBIDDEN", "该 sample_id 已被其他账号声明")
+            if existing_sample["upload_state"] == "withdrawn":
+                raise DomainError(409, "STATE_CONFLICT", "已撤回记录不能重复声明，请使用新记录")
             upload = store.get_upload(existing_sample["upload_id"])
             if upload["content_hash"] != content_hash:
                 raise DomainError(409, "IDEMPOTENCY_CONFLICT", "同一 sample_id 的声明内容不同", {
@@ -741,6 +746,31 @@ def complete_upload(upload_id: str, request: Request,
         return _complete_out(upload)
 
 
+class WithdrawalOut(BaseModel):
+    sample_id: str
+    state: Literal["withdrawn"] = "withdrawn"
+
+
+@router.post("/samples/{sample_id}/withdraw", tags=["samples"], response_model=WithdrawalOut,
+             summary="采集人撤回本人已上传记录（幂等）")
+def withdraw_sample(sample_id: str, request: Request,
+                    user: dict[str, Any] = Depends(current_user)) -> WithdrawalOut:
+    _require_upload_role(user)
+    with request.app.state.storage.transaction() as store:
+        sample = store.get_sample(sample_id.lower())
+        if sample is None or sample["owner_id"] != user["user_id"]:
+            raise DomainError(404, "NOT_FOUND", "记录不存在或不可撤回")
+        if sample["upload_state"] == "withdrawn":
+            return WithdrawalOut(sample_id=sample["sample_id"])
+        if sample["upload_state"] != "complete":
+            raise DomainError(409, "STATE_CONFLICT", "只有上传完成的记录可以撤回")
+        sample["upload_state"] = "withdrawn"
+        sample["review_version"] += 1
+        sample["review_events"].append({"event_id": new_uuid7(), "action": "withdraw",
+            "actor_id": user["user_id"], "actor_display_name": user["display_name"], "at": iso_utc()})
+    return WithdrawalOut(sample_id=sample_id.lower())
+
+
 def original_key(image: dict[str, Any]) -> str:
     ext = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}[image["mime_type"]]
     return image.get("file_key") or f"originals/{image['image_id']}.{ext}"
@@ -803,6 +833,9 @@ def get_sample_image(
     with storage.transaction(write=False) as store:
         upload = store.find_upload_for_image(image_id)
         if upload is None:
+            raise DomainError(404, "NOT_FOUND", "图片不存在或不可见")
+        sample = store.get_sample(upload["sample_id"])
+        if sample is None or sample["upload_state"] == "withdrawn":
             raise DomainError(404, "NOT_FOUND", "图片不存在或不可见")
         image = upload["images"][image_id]
         if upload["owner_id"] != user["user_id"] and user["role"] not in _MEDIA_READ_ROLES:

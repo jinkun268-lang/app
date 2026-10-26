@@ -32,7 +32,7 @@ class UploadOrchestratorTest {
         server.start()
         val retrofit = Retrofit.Builder()
             .baseUrl(server.url("/"))
-            .client(OkHttpClient())
+            .client(OkHttpClient.Builder().retryOnConnectionFailure(false).build())
             .addConverterFactory(CitrusJson.asConverterFactory("application/json".toMediaType()))
             .build()
         upload = retrofit.create(UploadService::class.java)
@@ -83,6 +83,51 @@ class UploadOrchestratorTest {
         val bytes = request.body.clone().readByteArray()
         return """{"upload_id":"u1","image_id":"$imageId","receive_status":"received",
             "sha256":"${sha256(bytes)}","file_size":${bytes.size}}"""
+    }
+
+    @Test fun lostAcknowledgementsRetryWithSameDeclarationAndImageBytes() = runBlocking {
+        val img = image(byteArrayOf(1, 2, 3))
+        val calls = mutableMapOf<String, Int>()
+        val declarations = mutableListOf<String>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val key = "${request.method} ${request.path}"
+                val count = (calls[key] ?: 0) + 1
+                calls[key] = count
+                if (request.path == "/uploads") declarations.add(request.body.clone().readUtf8())
+                if (request.method == "PUT") putRequests.add(request)
+                // The server may already have applied the request, while its response is lost.
+                if (count == 1) return MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST)
+                return when {
+                    request.path == "/uploads" -> json(200, statusJson(emptyList(), listOf(img.imageId), emptyList()))
+                    request.method == "GET" -> statusOk(emptyList(), listOf(img.imageId), emptyList())
+                    request.method == "PUT" -> json(200, receipt(request))
+                    request.path?.endsWith("/complete") == true -> completeOk(1)
+                    else -> MockResponse().setResponseCode(404)
+                }
+            }
+        }
+        val outcome = UploadOrchestrator(upload).run(data(img), null, "Bearer token")
+        assertEquals("u1", outcome.uploadId)
+        assertEquals(1, outcome.imageCount)
+        assertEquals(4, calls.size)
+        assertTrue(calls.values.all { it == 2 })
+        assertEquals(declarations[0], declarations[1])
+        assertEquals(2, putRequests.size)
+        assertArrayEquals(putRequests[0].body.clone().readByteArray(), putRequests[1].body.clone().readByteArray())
+    }
+
+    @Test fun persistentConnectionFailureStopsWithoutFakingCompletion() = runBlocking {
+        val img = image(byteArrayOf(1))
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) = MockResponse()
+                .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST)
+        }
+        var failure: java.io.IOException? = null
+        try { UploadOrchestrator(upload).run(data(img), "u1", "Bearer token") }
+        catch (e: java.io.IOException) { failure = e }
+        assertTrue(failure != null)
+        assertEquals(2, server.requestCount)
     }
 
     @Test
