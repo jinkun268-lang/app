@@ -59,3 +59,17 @@ npm --prefix admin run build
 ```
 
 接口变更同步`contracts/openapi.yaml`及相关测试，再运行`npm --prefix admin run generate:types`。DDL基线由`python tools/export-schema.py`生成；切换数据库URL不会自动搬迁数据。运行数据、凭据和本机路径配置不得提交。
+
+## 单张识别
+
+Android 照片缩略图下的“识别此图”连接 `POST /api/v1/recognitions`，返回真实模型候选并保存在该图片的本地记录中。结果不会自动更改类别，需点击“采用结果”；旧的多图记录会只把选中图片单独成条，其他图片不改。已开始上传的记录不能重新识别或采用结果，已保存结果可以只读查看。重拍会清除旧识别结果。Room 2→3 的迁移仅新增图片识别结果字段。
+
+未配置模型时接口返回503，不使用模拟结果。配置 `APP_RECOGNITION_PYTHON` 为已安装 PyTorch/torchvision 的独立 Python，`APP_RECOGNITION_MANIFEST` 为模型清单的绝对路径；主 API 环境不需要安装 PyTorch。清单示例见 [deploy/recognition.example.json](deploy/recognition.example.json)，`weights` 替换为本机训练权重路径，类别顺序必须与训练时一致。当前 worker 支持 torchvision EfficientNet-B0 的 state_dict，用 `weights_only=True` 加载、不下载预训练权重，使用2个CPU线程。
+
+当前接入的是实验性叶片五分类模型，仅供人工复核，不用于果实或虫体。分数不是诊断确定性；无法映射到现有启用字典的类别，采用时使用“不确定”，原始模型建议仍保留。接口只接受采集账号，单图最多20MiB、2400万像素，单并发、推理超时45秒；临时图片在推理结束后清除，不自动加入训练集。
+
+识别前会先跑一次本地 YOLO 检测（SciDB 15 类，`mAP50 0.964`）判断画面里有没有叶片：没有检出叶片类目标时直接返回 `422 NO_LEAF`，不再让闭集分类器强行给类别；检出叶片时按最大叶片框裁剪，再交给五分类模型。检测器不可用时自动退化为纯分类，不阻断主链路。权重与 Python 环境写在 `server/config/detector.json`（指向本机已训练的 YOLO11n），不下载模型；分类模型的 manifest 仍由 `APP_RECOGNITION_MANIFEST` / `APP_RECOGNITION_PYTHON` 提供。
+
+## 采集记录粒度
+
+Android 端一张照片就是一条采集记录：每次按下快门立即创建独立记录，品种、部位、类别、症状、备注和识别结果都只属于这一张图片；编辑、上传、撤回也按单条记录进行，互不影响。拍摄页只维护本次会话的缩略图用于跳转，不写入数据库，也不引入批次、批量上传或记录合并。旧版本留下的多图记录仍可打开、上传和撤回，界面会标注它们共用同一条信息，新拍的照片不会追加进去。

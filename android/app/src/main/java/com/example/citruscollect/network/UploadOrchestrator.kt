@@ -3,9 +3,11 @@ package com.example.citruscollect.network
 import com.example.citruscollect.util.sha256Streaming
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
+import java.io.IOException
 import java.time.Instant
 import java.time.format.DateTimeParseException
 
@@ -59,6 +61,15 @@ data class UploadOutcome(
  *   不使用本地时间伪造。
  */
 class UploadOrchestrator(private val upload: UploadService) {
+    /** All four protocol steps are idempotent for the same fixed declaration and image IDs.
+     * Retry only transport failures, once; HTTP/business failures and cancellation propagate.
+     */
+    private suspend fun <T> retryConnection(block: suspend () -> T): T = try {
+        block()
+    } catch (_: IOException) {
+        delay(250)
+        block()
+    }
 
     suspend fun run(
         data: UploadRequestData,
@@ -69,7 +80,7 @@ class UploadOrchestrator(private val upload: UploadService) {
         var uploadId = existingUploadId
         if (uploadId == null) {
             data.images.forEach { verifyLocalFile(it) }
-            val declared = upload.declare(authorization, data.toDeclaration())
+            val declared = retryConnection { upload.declare(authorization, data.toDeclaration()) }
             if (declared.upload_id.isBlank() || declared.sample_id != data.sampleId) {
                 throw UploadException("上传声明回执与本次上传不一致")
             }
@@ -77,7 +88,7 @@ class UploadOrchestrator(private val upload: UploadService) {
             onUploadId(uploadId)
         }
 
-        val status = upload.status(authorization, uploadId)
+        val status = retryConnection { upload.status(authorization, uploadId) }
         val pending = validateStatus(status, uploadId, data)
 
         for (imageId in pending) {
@@ -87,7 +98,7 @@ class UploadOrchestrator(private val upload: UploadService) {
             uploadImage(authorization, uploadId, image)
         }
 
-        val complete = upload.complete(authorization, uploadId)
+        val complete = retryConnection { upload.complete(authorization, uploadId) }
         return validateComplete(complete, uploadId, data)
     }
 
@@ -122,13 +133,13 @@ class UploadOrchestrator(private val upload: UploadService) {
 
     private suspend fun uploadImage(authorization: String, uploadId: String, image: UploadImage) {
         val body = image.file.asRequestBody(image.mimeType.toMediaType())
-        val receipt = upload.uploadImage(
+        val receipt = retryConnection { upload.uploadImage(
             authorization = authorization,
             uploadId = uploadId,
             imageId = image.imageId,
             sha256 = image.sha256,
             body = body
-        )
+        ) }
         // 契约：成功回执 receive_status 恒为 received（仅表示字节完整，与人工质量审核无关），
         // upload_id/image_id/sha256/file_size 逐项与本次声明一致才继续。
         if (receipt.upload_id != uploadId ||

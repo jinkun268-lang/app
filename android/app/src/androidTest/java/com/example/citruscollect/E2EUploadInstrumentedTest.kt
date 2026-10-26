@@ -70,7 +70,7 @@ class E2EUploadInstrumentedTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val attempts = AtomicInteger(0)
         val http = OkHttpClient.Builder().addInterceptor { chain ->
-            if (chain.request().method == "PUT" && attempts.incrementAndGet() == 2) {
+            if (chain.request().method == "PUT" && attempts.incrementAndGet() in 2..3) {
                 throw IOException("Deliberate client interruption before second image")
             }
             chain.proceed(chain.request())
@@ -106,7 +106,7 @@ class E2EUploadInstrumentedTest {
         db = Room.databaseBuilder(context, AppDatabase::class.java, databaseName).build()
         val resumed = SampleRepository(db.sampleDao(), db.imageDao(), backend, auth)
         val outcome = resumed.upload(sampleId)
-        assertEquals("Only missing second image is retried", 3, attempts.get())
+        assertEquals("Only missing second image is retried after the bounded automatic retry", 4, attempts.get())
         File(context.getExternalFilesDir(null), "client-recovery-result.json").writeText(
             JSONObject().put("sample_id", sampleId).put("image_id", image1)
                 .put("sha256", com.example.citruscollect.util.sha256Streaming(file1))

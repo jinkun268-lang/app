@@ -250,6 +250,9 @@ interface AuthService {
 }
 
 interface UploadService {
+    @POST("samples/{sampleId}/withdraw")
+    suspend fun withdraw(@Header("Authorization") authorization: String,
+                         @Path("sampleId") sampleId: String): WithdrawalResponse
     @POST("uploads")
     suspend fun declare(
         @Header("Authorization") authorization: String,
@@ -276,6 +279,28 @@ interface UploadService {
         @Header("Authorization") authorization: String,
         @Path("uploadId") uploadId: String
     ): UploadCompleteResponse
+}
+
+@Serializable
+data class WithdrawalResponse(val sample_id: String, val state: String)
+
+interface BootstrapService {
+    @GET("config/bootstrap")
+    suspend fun bootstrap(@Header("Authorization") authorization: String): BootstrapResponse
+}
+
+@Serializable
+data class RecognitionCandidate(val label: String, val name: String, val score: Double, val class_id: String? = null)
+
+@Serializable
+data class RecognitionResult(val image_id: String, val sha256: String, val model: String,
+    val model_version: String, val scope: String, val candidates: List<RecognitionCandidate>,
+    val warning: String, val created_at: String, val accepted: Boolean = false, val accepted_index: Int? = null)
+
+interface RecognitionService {
+    @POST("recognitions")
+    suspend fun recognize(@Header("Authorization") authorization: String,
+        @Header("X-Image-ID") imageId: String, @Body image: RequestBody): RecognitionResult
 }
 
 // ---------------- Json 与后端工厂 ----------------
@@ -309,7 +334,8 @@ class Backend(
         const val CLIENT_VERSION = "android/0.1.0"
     }
 
-    data class Services(val auth: AuthService, val upload: UploadService)
+    data class Services(val auth: AuthService, val upload: UploadService, val config: BootstrapService,
+        val recognition: RecognitionService)
 
     private val lock = Any()
 
@@ -383,7 +409,13 @@ class Backend(
             .build()
         return Services(
             auth = retrofit.create(AuthService::class.java),
-            upload = retrofit.create(UploadService::class.java)
+            upload = retrofit.create(UploadService::class.java),
+            recognition = retrofit.create(RecognitionService::class.java),
+            // Only this read-only service may replay a failed connection. Auth and uploads keep their original policy.
+            config = Retrofit.Builder().baseUrl(baseUrl)
+                .client(http.newBuilder().retryOnConnectionFailure(true).build())
+                .addConverterFactory(CitrusJson.asConverterFactory("application/json".toMediaType()))
+                .build().create(BootstrapService::class.java)
         )
     }
 

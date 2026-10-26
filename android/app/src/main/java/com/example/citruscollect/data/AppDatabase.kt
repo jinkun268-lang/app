@@ -8,12 +8,13 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.citruscollect.data.dao.ImageDao
 import com.example.citruscollect.data.dao.SampleDao
+import com.example.citruscollect.data.entity.BatchEntity
 import com.example.citruscollect.data.entity.ImageEntity
 import com.example.citruscollect.data.entity.SampleEntity
 
 @Database(
-    entities = [SampleEntity::class, ImageEntity::class],
-    version = 2,
+    entities = [SampleEntity::class, ImageEntity::class, BatchEntity::class],
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -23,6 +24,23 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE images ADD COLUMN recognitionJson TEXT")
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `batches` (`batchId` TEXT NOT NULL, `name` TEXT NOT NULL, " +
+                        "`place` TEXT NOT NULL, `collector` TEXT NOT NULL, `defaultCultivarId` TEXT NOT NULL, " +
+                        "`note` TEXT NOT NULL, `closed` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`batchId`))"
+                )
+                db.execSQL("ALTER TABLE samples ADD COLUMN batchId TEXT")
+            }
+        }
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -37,7 +55,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "citrus-collect.db"
-                ).addMigrations(MIGRATION_1_2).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { INSTANCE = it }
             }
     }
 }

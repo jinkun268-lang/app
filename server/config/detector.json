@@ -1,0 +1,21 @@
+{
+  "name": "SciDB YOLO11n 叶片/病斑检测",
+  "weights": "D:/病虫害论文/复现实验记录/yolo11n_public_compare_20261004/产物/yolo11n/weights/best.pt",
+  "python": "D:/anaconda/envs/minidector/python.exe",
+  "min_score": 0.25,
+  "max_det": 30,
+  "leaf_labels": [
+    "S2 Healthy leaf",
+    "S3 Blotchy mottling",
+    "S5 Zinc deficiency",
+    "S6 Vein yellowing",
+    "S7 Uniform yellowing",
+    "S8 Magnesium deficiency",
+    "S9 Boron deficiency",
+    "S10 Anthracnose",
+    "S11 Citrus greasy spot",
+    "S12 Algal spot and moss",
+    "S13 Sooty mould",
+    "S14 Canker"
+  ]
+}

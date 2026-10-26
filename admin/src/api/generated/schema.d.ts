@@ -4,6 +4,46 @@
  */
 
 export interface paths {
+    "/recognitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 单张图片识别，返回待人工确认的候选
+         * @description 仅采集账号可调用；最大20MiB、2400万像素、单并发。模型未配置返回503，不生成模拟结果。不创建采集记录、不自动写入类别。
+         */
+        post: operations["recognizeSingleImage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/samples/{sample_id}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 采集人撤回本人已上传记录（幂等）
+         * @description 撤回后不再进入审核和新导出；已创建的历史导出快照保留。重新提交须使用新的样本和图片ID。
+         */
+        post: operations["withdrawSample"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -1508,6 +1548,119 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    recognizeSingleImage: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Image-ID": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/jpeg": string;
+                "image/png": string;
+                "image/webp": string;
+            };
+        };
+        responses: {
+            /** @description 当前图片的真实模型候选，需人工复核 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        image_id: string;
+                        sha256: string;
+                        model: string;
+                        model_version: string;
+                        scope: string;
+                        warning: string;
+                        /** Format: date-time */
+                        created_at: string;
+                        candidates: {
+                            label: string;
+                            name: string;
+                            score: number;
+                            class_id?: string | null;
+                        }[];
+                    };
+                };
+            };
+            /** @description 图片字节或像素超限 */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 图片不支持或解码失败 */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 识别服务繁忙 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 模型未配置或暂时不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    withdrawSample: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sample_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已撤回（重复请求返回相同结果） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        sample_id: string;
+                        /** @enum {string} */
+                        state: "withdrawn";
+                    };
+                };
+            };
+            /** @description 记录不存在或不属于当前采集人 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 记录尚未上传完成 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     health: {
         parameters: {
             query?: never;

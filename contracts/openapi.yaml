@@ -40,6 +40,79 @@ tags:
     description: 专家工单（F2 / M2）
 
 paths:
+  /recognitions:
+    post:
+      tags: [recognition]
+      operationId: recognizeSingleImage
+      summary: 单张图片识别，返回待人工确认的候选
+      description: 仅采集账号可调用；最大20MiB、2400万像素、单并发。模型未配置返回503，不生成模拟结果。不创建采集记录、不自动写入类别。
+      parameters:
+        - name: X-Image-ID
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/png: { schema: { type: string, format: binary } }
+          image/webp: { schema: { type: string, format: binary } }
+      responses:
+        '200':
+          description: 当前图片的真实模型候选，需人工复核
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [image_id, sha256, model, model_version, scope, candidates, warning, created_at]
+                properties:
+                  image_id: { type: string, format: uuid }
+                  sha256: { type: string }
+                  model: { type: string }
+                  model_version: { type: string }
+                  scope: { type: string }
+                  warning: { type: string }
+                  created_at: { type: string, format: date-time }
+                  candidates:
+                    type: array
+                    minItems: 1
+                    maxItems: 5
+                    items:
+                      type: object
+                      required: [label, name, score]
+                      properties:
+                        label: { type: string }
+                        name: { type: string }
+                        score: { type: number, minimum: 0, maximum: 1 }
+                        class_id: { type: [string, 'null'] }
+        '413': { description: 图片字节或像素超限 }
+        '415': { description: 图片不支持或解码失败 }
+        '429': { description: 识别服务繁忙 }
+        '503': { description: 模型未配置或暂时不可用 }
+  /samples/{sample_id}/withdraw:
+    post:
+      tags: [samples]
+      summary: 采集人撤回本人已上传记录（幂等）
+      operationId: withdrawSample
+      description: 撤回后不再进入审核和新导出；已创建的历史导出快照保留。重新提交须使用新的样本和图片ID。
+      parameters:
+        - name: sample_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: 已撤回（重复请求返回相同结果）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sample_id, state]
+                properties:
+                  sample_id: { type: string, format: uuid }
+                  state: { type: string, enum: [withdrawn] }
+        '404': { description: 记录不存在或不属于当前采集人 }
+        '409': { description: 记录尚未上传完成 }
   # ---------------- 健康 ----------------
   /health:
     get:

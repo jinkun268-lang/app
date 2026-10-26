@@ -15,6 +15,14 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import retrofit2.HttpException
+import kotlinx.coroutines.flow.first
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import com.example.citruscollect.network.CitrusJson
+import java.io.IOException
+
+@Serializable
+private data class CachedBootstrap(val savedAt: Long, val data: BootstrapResponse)
 
 /**
  * 认证与配置仓库：真实网络登录、刷新、退出、bootstrap。
@@ -145,8 +153,26 @@ class AuthRepository(
         }
     }
 
-    suspend fun bootstrap(): BootstrapResponse = authorizedServices { services, token ->
-        services.auth.bootstrap("Bearer $token")
+    suspend fun bootstrap(forceRefresh: Boolean = false): BootstrapResponse {
+        restorePersistedBaseUrl()
+        val startEpoch = currentEpoch()
+        val key = "${session.baseUrlValue()}\n${session.username.first()}"
+        val cached = session.loadBootstrapCache(key)?.let {
+            runCatching { CitrusJson.json.decodeFromString<CachedBootstrap>(it) }.getOrNull()
+        }
+        if (!forceRefresh && cached != null && System.currentTimeMillis() - cached.savedAt in 0..300_000L && currentEpoch() == startEpoch) return cached.data
+        try {
+            val loaded = authorizedServices { services, token -> services.config.bootstrap("Bearer $token") }
+            if (currentEpoch() != startEpoch) throw AuthExpiredException("会话已切换，请重新操作")
+            session.saveBootstrapCache(key, CitrusJson.json.encodeToString(CachedBootstrap(System.currentTimeMillis(), loaded)))
+            return loaded
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val transient = e is IOException || (e is HttpException && (e.code() == 429 || e.code() >= 500))
+            if (transient && cached != null && currentEpoch() == startEpoch) return cached.data
+            throw e
+        }
     }
 
     suspend fun <T> authorized(block: suspend (token: String) -> T): T =
