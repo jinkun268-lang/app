@@ -221,6 +221,133 @@ paths:
               schema: { $ref: "#/components/schemas/BootstrapResponse" }
 
   # ---------------- 样本 ----------------
+  /batches:
+    get:
+      operationId: listBatches
+      summary: 采集员仅本人，其他管理角色可查看批次
+      tags: [batches]
+      parameters:
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BatchPage"}
+        "401": {$ref: "#/components/responses/AuthRequired"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/StateConflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /batches/{batch_id}:
+    put:
+      operationId: putBatch
+      summary: 创建或编辑本人批次，跨账号 ID 返回 404
+      tags: [batches]
+      parameters:
+        - {name: batch_id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/BatchInput"}
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Batch"}
+        "401": {$ref: "#/components/responses/AuthRequired"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/StateConflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /questions:
+    get:
+      operationId: listCollectionQuestions
+      summary: 采集员仅本人，expert/super_admin 可查看全部咨询
+      tags: [questions]
+      parameters:
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CollectionQuestionPage"}
+        "401": {$ref: "#/components/responses/AuthRequired"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/StateConflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+    post:
+      operationId: createCollectionQuestion
+      summary: 本人已上传样本可附图；同 ID 同内容幂等，异内容 409
+      tags: [questions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CollectionQuestionInput"}
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CollectionQuestion"}
+        "201":
+          description: 已创建
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CollectionQuestion"}
+        "401": {$ref: "#/components/responses/AuthRequired"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/StateConflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /questions/{question_id}:
+    get:
+      operationId: getCollectionQuestion
+      summary: 咨询详情与鉴权图片链接
+      tags: [questions]
+      parameters:
+        - {name: question_id, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CollectionQuestion"}
+        "401": {$ref: "#/components/responses/AuthRequired"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/StateConflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+  /questions/{question_id}/answer:
+    patch:
+      operationId: answerCollectionQuestion
+      summary: 仅 expert/super_admin 写入真实答复
+      tags: [questions]
+      parameters:
+        - {name: question_id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CollectionAnswerInput"}
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CollectionQuestion"}
+        "401": {$ref: "#/components/responses/AuthRequired"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/StateConflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
   /samples:
     get:
       tags: [samples]
@@ -228,6 +355,7 @@ paths:
       summary: 样本列表（分页、筛选）
       description: 采集人员仅查询本人，expert/admin/super_admin 查询全部；范围在分页前确定。
       parameters:
+        - {name: batch_id, in: query, schema: {type: string}}
         - { $ref: "#/components/parameters/UploadState" }
         - { $ref: "#/components/parameters/ReviewStatus" }
         - { $ref: "#/components/parameters/Excluded" }
@@ -1576,10 +1704,99 @@ components:
         unchanged: { type: integer }
 
     # ---------- 样本 ----------
+    BatchInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 128}
+        place: {type: string, maxLength: 256, default: ""}
+        collector: {type: string, maxLength: 128, default: ""}
+        default_cultivar_id: {type: [string, "null"]}
+        note: {type: [string, "null"], maxLength: 500}
+        closed: {type: boolean, default: false}
+        created_at: {type: [string, "null"], format: date-time}
+    Batch:
+      type: object
+      required: [batch_id, owner_id, name, place, collector, default_cultivar_id, note, closed, created_at, updated_at]
+      properties:
+        batch_id: {type: string}
+        owner_id: {type: string}
+        name: {type: string}
+        place: {type: string}
+        collector: {type: string}
+        default_cultivar_id: {type: [string, "null"]}
+        note: {type: [string, "null"]}
+        closed: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    BatchPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Batch"}}
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+    CollectionQuestionInput:
+      type: object
+      additionalProperties: false
+      required: [question_id, text]
+      properties:
+        question_id: {type: string, minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9_-]+$"}
+        text: {type: string, minLength: 1, maxLength: 2000}
+        sample_id: {type: [string, "null"]}
+    CollectionAnswerInput:
+      type: object
+      additionalProperties: false
+      required: [answer]
+      properties:
+        answer: {type: string, minLength: 1, maxLength: 4000}
+    CollectionQuestion:
+      type: object
+      required: [question_id, text, sample_id, owner_id, status, answer, created_at, answered_at, images, sample]
+      properties:
+        question_id: {type: string}
+        text: {type: string}
+        sample_id: {type: [string, "null"]}
+        owner_id: {type: string}
+        status: {type: string, enum: [open, answered]}
+        answer: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+        answered_at: {type: [string, "null"], format: date-time}
+        sample:
+          anyOf:
+            - {$ref: "#/components/schemas/SampleDetail"}
+            - {type: "null"}
+        images:
+          type: array
+          items:
+            type: object
+            required: [image_id, preview_url, original_url]
+            properties:
+              image_id: {type: string}
+              preview_url: {type: string, description: 继承样本图片 Bearer 鉴权}
+              original_url: {type: string}
+    CollectionQuestionPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/CollectionQuestion"}}
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
     SampleSummary:
       type: object
       required: [sample_id, tree_id, original_cultivar_id, original_cultivar_name, original_part, original_class_id, original_class_name, review_status, excluded, upload_completed_at, image_count, first_image_id]
       properties:
+        batch_id: {type: [string, "null"], maxLength: 64}
+        latitude: {type: [number, "null"], minimum: -90, maximum: 90}
+        longitude: {type: [number, "null"], minimum: -180, maximum: 180}
+        location_accuracy_m: {type: [number, "null"], minimum: 0}
+        batch_snapshot:
+          anyOf:
+            - {$ref: "#/components/schemas/Batch"}
+            - {type: "null"}
         sample_id: { $ref: "#/components/schemas/Id" }
         tree_id: { type: [string, "null"] }
         original_cultivar_id: { type: string }
@@ -1663,6 +1880,14 @@ components:
       type: object
       required: [sample_id, tree_id, original_cultivar_id, original_cultivar_name, original_part, original_class_id, original_class_name, symptoms, note, taxonomy_version, upload_state, upload_completed_at, excluded, review_status, final_cultivar_id, final_cultivar_name, final_part, final_class_id, final_class_name, review_note, review_version, reviewed_by_display_name, reviewed_at, images, review_events]
       properties:
+        batch_id: {type: [string, "null"], maxLength: 64}
+        latitude: {type: [number, "null"], minimum: -90, maximum: 90}
+        longitude: {type: [number, "null"], minimum: -180, maximum: 180}
+        location_accuracy_m: {type: [number, "null"], minimum: 0}
+        batch_snapshot:
+          anyOf:
+            - {$ref: "#/components/schemas/Batch"}
+            - {type: "null"}
         sample_id: { $ref: "#/components/schemas/Id" }
         tree_id: { type: [string, "null"] }
         original_cultivar_id: { type: string }
@@ -1749,6 +1974,10 @@ components:
         声明体 >64KiB 返回 413；1–12 图；单图 ≤20MiB；合计 ≤120MiB（JSON Schema 只能表达单图上限，清单求和与 image_id 唯一性由实现校验）。
       required: [sample_id, schema_version, cultivar_id, part, class_id, images]
       properties:
+        batch_id: {type: [string, "null"], maxLength: 64}
+        latitude: {type: [number, "null"], minimum: -90, maximum: 90}
+        longitude: {type: [number, "null"], minimum: -180, maximum: 180}
+        location_accuracy_m: {type: [number, "null"], minimum: 0}
         sample_id: { $ref: "#/components/schemas/Id" }
         schema_version:
           type: integer

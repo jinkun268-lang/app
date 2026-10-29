@@ -93,3 +93,9 @@ export interface Page<T> {
   page_size: number
   total: number
 }
+
+// 同步采集批次与真实专家咨询
+export type Batch = Schemas['Batch']
+export type BatchPage = Schemas['BatchPage']
+export type CollectionQuestion = Schemas['CollectionQuestion']
+export type CollectionQuestionPage = Schemas['CollectionQuestionPage']

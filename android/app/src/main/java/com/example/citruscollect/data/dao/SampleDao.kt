@@ -11,6 +11,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface SampleDao {
+    @Query("SELECT COUNT(*) FROM samples WHERE ownerKey IS NULL")
+    fun observeLegacyCount(): Flow<Int>
+
     @Query("SELECT * FROM samples WHERE uploadState = 'uploaded' ORDER BY createdAt DESC")
     fun observeUploaded(): Flow<List<SampleEntity>>
 
@@ -31,10 +34,10 @@ interface SampleDao {
     fun observeById(sampleId: String): Flow<SampleEntity?>
 
     /** 未上传完成的草稿与待上传对象。 */
-    @Query("SELECT * FROM samples WHERE uploadState IN ('draft','pending','uploading','failed','needs_photos') ORDER BY createdAt DESC")
+    @Query("SELECT * FROM samples WHERE uploadState IN ('draft','pending','queued','retrying','uploading','failed','needs_photos') ORDER BY createdAt DESC")
     fun observePending(): Flow<List<SampleEntity>>
 
-    @Query("SELECT COUNT(*) FROM samples WHERE uploadState IN ('draft','pending','failed','needs_photos')")
+    @Query("SELECT COUNT(*) FROM samples WHERE uploadState IN ('draft','pending','queued','retrying','failed','needs_photos')")
     fun observePendingCount(): Flow<Int>
 
     @Query("UPDATE samples SET uploadId = :uploadId WHERE sampleId = :sampleId")

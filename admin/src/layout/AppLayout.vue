@@ -105,7 +105,7 @@ const route = useRoute()
 const router = useRouter()
 const bootstrap = useBootstrapStore()
 
-// 真实 HTTP 模式已接入：样本、导出、账号管理。专家工单、基础字典、审计未接入，
+// 真实 HTTP 模式已接入：样本、批次、咨询、导出、账号管理。旧工单、基础字典、审计未接入，
 // 菜单隐藏且不挂载页面；模拟模式保留这些页面，便于开发态联调。
 const realMode = !isMockEnabled()
 const UNOPENED = new Set(['tickets', 'dictionaries', 'audit'])
@@ -174,6 +174,7 @@ const groups = computed(() => {
       label: '采集与核验',
       items: [
         { to: '/samples', label: auth.role === 'collector' ? '我的采集' : '采集记录', icon: Images },
+        { to: '/batches', label: '采集批次', icon: ClipboardList },
         ...(capabilities.review ? [{ to: '/reviews', label: '样本核验', icon: ClipboardList }] : []),
       ],
     })
@@ -183,6 +184,9 @@ const groups = computed(() => {
       { to: '/training/quality', label: '质量检查', icon: Images },
       { to: '/exports', label: '数据导出', icon: PackageOpen },
     ] })
+  }
+  if (auth.isExpert || auth.isSuper) {
+    g.push({ key: 'questions', label: '专家咨询', items: [{ to: '/questions', label: '咨询答复', icon: ClipboardList }] })
   }
   if (!realMode && (auth.isExpert || auth.isSuper)) {
     g.push({ key: 'qa', label: '专家工单', items: [{ to: '/tickets', label: '工单队列', icon: ClipboardList }] })

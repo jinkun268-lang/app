@@ -24,6 +24,7 @@ export function useSampleList() {
   const filters = computed(() => {
     const excludedRaw = asStr(route.query.excluded)
     return {
+      batch_id: asStr(route.query.batch_id) || undefined,
       review_status: asStr(route.query.review_status) || (route.meta.workspace === 'quality' ? 'confirmed,corrected' : undefined),
       final_cultivar_id: asStr(route.query.final_cultivar_id) || undefined,
       final_class_id: asStr(route.query.final_class_id) || undefined,
@@ -68,6 +69,7 @@ export function useSampleList() {
     error.value = ''
     try {
       const res = await listSamples({
+        batch_id: filters.value.batch_id,
         review_status: filters.value.review_status,
         excluded: filters.value.excluded,
         final_cultivar_id: filters.value.final_cultivar_id,

@@ -103,6 +103,10 @@ class UploadDeclaration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sample_id: str
+    batch_id: str | None = Field(default=None, max_length=64)
+    latitude: float | None = Field(default=None, ge=-90, le=90, allow_inf_nan=False)
+    longitude: float | None = Field(default=None, ge=-180, le=180, allow_inf_nan=False)
+    location_accuracy_m: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     schema_version: Literal[1]
     tree_id: str | None = Field(default=None, max_length=64)
     cultivar_id: str
@@ -121,6 +125,10 @@ class UploadDeclaration(BaseModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> "UploadDeclaration":
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("经纬度必须一起提供")
+        if self.location_accuracy_m is not None and self.latitude is None:
+            raise ValueError("定位精度需要经纬度")
         seen: set[str] = set()
         for image in self.images:
             if image.image_id in seen:
@@ -243,6 +251,7 @@ def _canonical(decl: UploadDeclaration) -> dict[str, Any]:
     images.sort(key=lambda row: row["image_id"])
     return {
         "sample_id": decl.sample_id,
+        **{key: getattr(decl, key) for key in ("batch_id", "latitude", "longitude", "location_accuracy_m") if getattr(decl, key) is not None},
         "schema_version": decl.schema_version,
         "tree_id": decl.tree_id,
         "cultivar_id": decl.cultivar_id,
@@ -376,6 +385,7 @@ def public_sample(sample: dict[str, Any]) -> dict[str, Any]:
     """SampleDetail 投影（无果园）。仅 complete 样本可对客户端暴露；receiving 的 upload_completed_at 为 None。"""
     return {
         "sample_id": sample["sample_id"],
+        **{key: sample.get(key) for key in ("batch_id", "batch_snapshot", "latitude", "longitude", "location_accuracy_m")},
         "tree_id": sample["tree_id"],
         "original_cultivar_id": sample["original_cultivar_id"],
         "original_cultivar_name": sample["original_cultivar_name"],
@@ -439,6 +449,9 @@ def _new_sample(store: DataTransaction, decl: UploadDeclaration, user: dict[str,
         "owner_id": user["user_id"],
         "upload_id": upload_id,
         "tree_id": decl.tree_id,
+        "batch_id": decl.batch_id,
+        "batch_snapshot": dict(store.get_batch(decl.batch_id)) if decl.batch_id else None,
+        "latitude": decl.latitude, "longitude": decl.longitude, "location_accuracy_m": decl.location_accuracy_m,
         "original_cultivar_id": decl.cultivar_id,
         "original_cultivar_name": _label(store, "cultivar", decl.cultivar_id),
         "original_part": decl.part,
@@ -592,6 +605,12 @@ def _declare_received(storage, user, raw):
             # 同声明重放：200 + 同一 upload_id，不新建会话。
             return JSONResponse(status_code=200, content=_status_out(upload).model_dump())
 
+        if decl.batch_id:
+            batch = store.get_batch(decl.batch_id)
+            if batch is None or batch["owner_id"] != user["user_id"]:
+                raise DomainError(404, "NOT_FOUND", "批次不存在或不属于当前账号")
+            # 关闭只停止采集端的新拍摄。离线采集的旧照片可能尚未声明，
+            # 此处仍须接收，避免“先关闭批次再联网”导致原图永远传不上来。
         for image in decl.images:
             owner_upload = _upload_with_image(store, image.image_id)
             if owner_upload is not None:

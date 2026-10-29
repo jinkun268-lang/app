@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,7 @@ import com.example.citruscollect.ui.screens.CaptureHomeScreen
 import com.example.citruscollect.ui.screens.CaptureSessionScreen
 import com.example.citruscollect.ui.screens.ConfirmScreen
 import com.example.citruscollect.ui.screens.LoginScreen
+import com.example.citruscollect.ui.screens.QuestionScreen
 import com.example.citruscollect.ui.screens.RecordsScreen
 import com.example.citruscollect.ui.theme.CitrusColors
 import kotlinx.coroutines.launch
@@ -43,18 +45,20 @@ import kotlinx.coroutines.launch
 fun AppNav() {
     val container = LocalAppContainer.current
     val token by container.sessionStore.token.collectAsState(initial = null)
+    val ownerKey by container.authRepository.ownerKey.collectAsState(initial = null)
 
     if (token == null) {
         LoginScreen()
-    } else {
-        MainNav()
+    } else if (ownerKey != null) {
+        key(ownerKey) { MainNav() }
     }
 }
 
 private val TABS = listOf(
     Triple("capture", "◎", "采集"),
     Triple("records", "▦", "图片记录"),
-    Triple("batches", "▤", "采集批次")
+    Triple("batches", "▤", "采集批次"),
+    Triple("questions", "?", "专家咨询")
 )
 
 @Composable
@@ -80,7 +84,7 @@ private fun MainNav() {
     Scaffold(
         containerColor = CitrusColors.Screen,
         bottomBar = {
-            if (route in setOf("capture", "records", "batches")) {
+            if (route in setOf("capture", "records", "batches", "questions")) {
                 Column(Modifier.background(CitrusColors.White).navigationBarsPadding()) {
                     HorizontalDivider(color = CitrusColors.Line)
                     Row(
@@ -133,6 +137,7 @@ private fun MainNav() {
                     onLogout = { scope.launch { container.authRepository.logout() } }
                 )
             }
+            composable("questions") { QuestionScreen() }
             composable("batches") {
                 BatchesScreen(onCapture = { nav.navigate("shoot") })
             }

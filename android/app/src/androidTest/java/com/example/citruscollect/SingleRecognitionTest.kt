@@ -38,9 +38,11 @@ class SingleRecognitionTest {
             db.version = 2
         }
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4).build()
+            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5).build()
         try {
             assertEquals("kept note", upgraded.sampleDao().byId(sample)?.note)
+            assertNull(upgraded.sampleDao().byId(sample)?.ownerKey)
+            assertEquals(1, upgraded.sampleDao().observeLegacyCount().first())
             val restored = upgraded.imageDao().byId(image)!!
             assertEquals("kept.jpg", restored.filePath)
             assertEquals("context", restored.viewType)

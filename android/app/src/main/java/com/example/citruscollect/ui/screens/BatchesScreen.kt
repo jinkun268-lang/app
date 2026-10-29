@@ -3,6 +3,7 @@ package com.example.citruscollect.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -47,7 +48,7 @@ import java.util.Locale
 
 /**
  * 采集批次：承载一次外业采集的共同信息（地点、日期、采集人、默认品种）。
- * 批次只存在于采集端，不发往服务端，也不把图片合并成一条记录。
+ * 批次可同步到服务端，也可恢复云端批次，图片保持独立记录。
  */
 @Composable
 fun BatchesScreen(onCapture: () -> Unit) {
@@ -69,6 +70,9 @@ fun BatchesScreen(onCapture: () -> Unit) {
     }
 
     var creating by remember { mutableStateOf(false) }
+    var creatingBusy by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<BatchEntity?>(null) }
+    var syncing by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
 
     LazyColumn(Modifier.fillMaxSize().background(CitrusColors.Screen)) {
@@ -88,13 +92,28 @@ fun BatchesScreen(onCapture: () -> Unit) {
             Surface(
                 color = CitrusColors.Green,
                 shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).clickable { creating = true }
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).clickable { message = null; creating = true }
             ) {
                 Text("新建采集批次", fontSize = 12.sp, color = Color.White,
                     modifier = Modifier.padding(vertical = 12.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
         }
 
+        item {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("云端同步可在其他设备恢复批次", fontSize = 11.sp, modifier = Modifier.weight(1f))
+                TextButton(enabled = !syncing, onClick = {
+                    syncing = true
+                    scope.launch {
+                        try { message = "同步完成，共 ${repository.syncBatches()} 个云端批次" }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { message = e.message ?: "同步失败，本地批次已保留" }
+                        finally { syncing = false }
+                    }
+                }) { Text(if (syncing) "同步中…" else "同步 / 恢复") }
+            }
+            message?.let { Text(it, color = CitrusColors.Green, modifier = Modifier.padding(horizontal = 18.dp)) }
+        }
         if (batches.isEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -130,7 +149,15 @@ fun BatchesScreen(onCapture: () -> Unit) {
                 current = container.batchId == batch.batchId,
                 onClick = {
                     container.batchId = batch.batchId
-                    message = "已切换到「${batch.name}」"
+                    message = if (batch.closed) "已选择关闭批次，可查看记录；重开后可继续采集" else "已切换到「${batch.name}」"
+                },
+                onEdit = { editing = batch },
+                onToggleClosed = {
+                    scope.launch {
+                        try { repository.setBatchClosed(batch.batchId, !batch.closed) }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { message = e.message ?: "更新失败" }
+                    }
                 }
             )
         }
@@ -152,29 +179,44 @@ fun BatchesScreen(onCapture: () -> Unit) {
         }
     }
 
+    editing?.let { target ->
+        EditBatchDialog(target, cultivars, onDismiss = { editing = null }, onSave = { name, place, collector, cultivar, note ->
+            scope.launch {
+                try {
+                    repository.updateBatch(target.batchId, name, place, collector, cultivar, note)
+                    editing = null
+                    message = "已保存，点击同步可更新云端"
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { message = e.message ?: "保存失败" }
+            }
+        })
+    }
     if (creating) NewBatchDialog(
         collector = username.orEmpty(),
         cultivars = cultivars,
-        onDismiss = { creating = false },
+        error = message,
+        busy = creatingBusy,
+        onDismiss = { if (!creatingBusy) creating = false },
         onCreate = { name, place, cultivarId ->
-            creating = false
+            creatingBusy = true
             scope.launch {
                 try {
                     val id = repository.createBatch(name, place, username.orEmpty(), cultivarId)
                     container.batchId = id
+                    creating = false
                     onCapture()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     message = e.message ?: "创建批次失败"
-                }
+                } finally { creatingBusy = false }
             }
         }
     )
 }
 
 @Composable
-private fun BatchCard(batch: BatchEntity, records: List<SampleEntity>, current: Boolean, onClick: () -> Unit) {
+private fun BatchCard(batch: BatchEntity, records: List<SampleEntity>, current: Boolean, onClick: () -> Unit, onEdit: (() -> Unit)? = null, onToggleClosed: (() -> Unit)? = null) {
     val uploaded = records.count { it.uploadState == "uploaded" }
     val pending = records.size - uploaded
     Surface(
@@ -187,6 +229,7 @@ private fun BatchCard(batch: BatchEntity, records: List<SampleEntity>, current: 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(batch.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = CitrusColors.Ink)
                 Spacer(Modifier.weight(1f))
+                if (batch.closed) BatchPill("已关闭")
                 if (current) BatchPill("当前")
             }
             Text(
@@ -199,6 +242,13 @@ private fun BatchCard(batch: BatchEntity, records: List<SampleEntity>, current: 
                 CountItem(uploaded, "已上传")
                 CountItem(pending, "未上传")
             }
+            if (onEdit != null) {
+                Text(if (batch.syncPending) "本地已保存 · 待同步" else "已同步", fontSize = 10.sp, color = CitrusColors.Muted, modifier = Modifier.padding(top = 8.dp))
+                Row {
+                    TextButton(onClick = onEdit) { Text("编辑") }
+                    TextButton(onClick = { onToggleClosed?.invoke() }) { Text(if (batch.closed) "重新开启" else "关闭批次") }
+                }
+            }
         }
     }
 }
@@ -207,6 +257,8 @@ private fun BatchCard(batch: BatchEntity, records: List<SampleEntity>, current: 
 private fun NewBatchDialog(
     collector: String,
     cultivars: Map<String, String>,
+    error: String?,
+    busy: Boolean,
     onDismiss: () -> Unit,
     onCreate: (String, String, String) -> Unit
 ) {
@@ -222,13 +274,13 @@ private fun NewBatchDialog(
                 Text("批次承载地点、日期、采集人和默认品种；每张图片仍然独立成条。",
                     fontSize = 12.sp, color = CitrusColors.Muted, modifier = Modifier.padding(bottom = 12.dp))
                 OutlinedTextField(
-                    value = name, onValueChange = { name = it },
+                    value = name, onValueChange = { name = it.take(128) },
                     label = { Text("批次名称", fontSize = 12.sp) },
                     placeholder = { Text("例如：胡柚园 · 上午采集", fontSize = 12.sp) },
                     singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
-                    value = place, onValueChange = { place = it },
+                    value = place, onValueChange = { place = it.take(256) },
                     label = { Text("地点", fontSize = 12.sp) },
                     placeholder = { Text("例如：常山·青石镇 · A区", fontSize = 12.sp) },
                     singleLine = true, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -251,6 +303,7 @@ private fun NewBatchDialog(
                         }
                     }
                 }
+                error?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
                 if (collector.isNotBlank()) {
                     Text("采集人：$collector", fontSize = 11.sp, color = CitrusColors.Faint,
                         modifier = Modifier.padding(top = 12.dp))
@@ -258,11 +311,11 @@ private fun NewBatchDialog(
             }
         },
         confirmButton = {
-            TextButton(enabled = name.isNotBlank(), onClick = { onCreate(name, place, cultivar.ifBlank { "unknown" }) }) {
-                Text("创建并开始拍摄")
+            TextButton(enabled = name.isNotBlank() && !busy, onClick = { onCreate(name, place, cultivar.ifBlank { "unknown" }) }) {
+                Text(if (busy) "创建中…" else "创建并开始拍摄")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") } }
     )
 }
 
@@ -285,3 +338,27 @@ private fun dayOf(millis: Long): String =
     SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(Date(millis))
 
 private fun monthDay(day: String): String = day.takeLast(5).replace("-", "月") + "日"
+
+@Composable
+private fun EditBatchDialog(batch: BatchEntity, cultivars: Map<String, String>, onDismiss: () -> Unit, onSave: (String, String, String, String, String) -> Unit) {
+    var name by remember(batch.batchId) { mutableStateOf(batch.name) }
+    var place by remember(batch.batchId) { mutableStateOf(batch.place) }
+    var collector by remember(batch.batchId) { mutableStateOf(batch.collector) }
+    var cultivar by remember(batch.batchId) { mutableStateOf(batch.defaultCultivarId) }
+    var note by remember(batch.batchId) { mutableStateOf(batch.note) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("编辑采集批次") }, text = {
+        Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+            OutlinedTextField(name, { name = it.take(128) }, label = { Text("批次名称") }, singleLine = true)
+            OutlinedTextField(place, { place = it.take(256) }, label = { Text("地点") }, singleLine = true)
+            OutlinedTextField(collector, { collector = it.take(128) }, label = { Text("采集人") }, singleLine = true)
+            Text("默认品种", modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
+                cultivars.forEach { (id, name) ->
+                    androidx.compose.material3.FilterChip(selected = cultivar == id, onClick = { cultivar = id }, label = { Text(name) })
+                }
+            }
+            OutlinedTextField(note, { note = it.take(500) }, label = { Text("备注") })
+        }
+    }, confirmButton = { TextButton(enabled = name.isNotBlank() && cultivar.isNotBlank(), onClick = { onSave(name, place, collector, cultivar, note) }) { Text("保存") } },
+       dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
+}

@@ -22,5 +22,11 @@ data class SampleEntity(
     val uploadError: String? = null,
     /** 所属本地批次；旧版本记录为 null，显示在“历史记录”里。 */
     val batchId: String? = null,
+    val ownerKey: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val locationAccuracyM: Double? = null,
+    val captureQualityWarning: String? = null,
+    val reviewJson: String? = null,
     val createdAt: Long = System.currentTimeMillis()
 )

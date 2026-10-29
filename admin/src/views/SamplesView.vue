@@ -10,6 +10,7 @@
         <span class="config-error-text">基础配置加载失败</span>
         <button class="btn btn-sm" :disabled="bootstrap.loading" @click="retryConfig">{{ bootstrap.loading ? '重试中…' : '重试' }}</button>
       </div>
+      <div v-if="filters.batch_id" class="toolbar"><span>当前按采集批次筛选</span><button class="btn btn-sm" @click="setFilter('batch_id', undefined)">取消批次筛选</button></div>
       <div class="toolbar filters">
         <select
           :value="filters.review_status"
@@ -63,6 +64,7 @@
             </div>
             <div class="item-title">{{ s.original_class_name }}{{ s.final_class_name && s.final_class_name !== s.original_class_name ? ' → ' + s.final_class_name : '' }}</div>
             <div class="muted item-meta">{{ s.original_cultivar_name }} · {{ s.image_count }} 图</div>
+            <div v-if="s.batch_snapshot" class="muted item-meta">{{ s.batch_snapshot.name }} · {{ s.batch_snapshot.place }}</div>
           </button>
         </li>
       </ul>

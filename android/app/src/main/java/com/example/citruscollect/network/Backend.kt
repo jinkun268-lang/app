@@ -122,7 +122,11 @@ data class UploadDeclaration(
     val class_id: String,
     val symptoms: String? = null,
     val note: String? = null,
-    val images: List<ImageDeclaration>
+    val images: List<ImageDeclaration>,
+    val batch_id: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val location_accuracy_m: Double? = null
 )
 
 @Serializable
@@ -335,7 +339,7 @@ class Backend(
     }
 
     data class Services(val auth: AuthService, val upload: UploadService, val config: BootstrapService,
-        val recognition: RecognitionService)
+        val recognition: RecognitionService, val collection: CollectionService? = null)
 
     private val lock = Any()
 
@@ -409,6 +413,7 @@ class Backend(
             .build()
         return Services(
             auth = retrofit.create(AuthService::class.java),
+            collection = retrofit.create(CollectionService::class.java),
             upload = retrofit.create(UploadService::class.java),
             recognition = retrofit.create(RecognitionService::class.java),
             // Only this read-only service may replay a failed connection. Auth and uploads keep their original policy.

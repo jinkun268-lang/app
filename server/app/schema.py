@@ -1,14 +1,15 @@
 """Initial relational business schema, portable across SQLite/MySQL/PostgreSQL."""
 from __future__ import annotations
 
-from sqlalchemy import (JSON, BigInteger, Boolean, Column, DateTime, ForeignKey, Index,
+from sqlalchemy import (JSON, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Index,
                         Integer, MetaData, String, Table, Text, UniqueConstraint)
 from sqlalchemy.dialects.mysql import DATETIME, VARCHAR
 
-SCHEMA_VERSION = "2"
-ENTITY_ORDER = ("users", "cultivars", "classes", "config", "uploads", "samples", "images",
-                "sessions", "exports", "export_items", "idempotency")
+SCHEMA_VERSION = "3"
+ENTITY_ORDER = ("users", "cultivars", "classes", "config", "batches", "uploads", "samples", "images",
+                "sessions", "exports", "export_items", "idempotency", "questions")
 PRIMARY_KEYS = {
+    "batches": ("batch_id",), "questions": ("question_id",),
     "users": ("user_id",), "sessions": ("token_hash",), "cultivars": ("cultivar_id",),
     "classes": ("class_id",), "config": ("config_key",), "uploads": ("upload_id",),
     "samples": ("sample_id",), "images": ("image_id",), "exports": ("export_id",),
@@ -44,6 +45,13 @@ def build_schema():
           col("deprecated_taxonomy_version", Integer, nullable=True), col("version", Integer))
     table("config", col("config_key", String(32), primary_key=True),
           col("taxonomy_version", Integer), col("policy_version", Integer))
+    table("batches", col("batch_id", String(64), primary_key=True), ref("owner_id", "users.user_id"),
+          col("name", String(128)), col("place", String(256)), col("collector", String(128)),
+          col("default_cultivar_id", String(64), nullable=True), col("note", Text, nullable=True),
+          col("closed", Boolean), col("created_at", timestamp), col("updated_at", timestamp))
+    table("questions", col("question_id", String(64), primary_key=True), ref("owner_id", "users.user_id"),
+          col("text", Text), ref("sample_id", "samples.sample_id", nullable=True), col("status", String(16)),
+          col("answer", Text, nullable=True), col("created_at", timestamp), col("answered_at", timestamp, nullable=True))
     table("uploads", col("upload_id", String(36), primary_key=True),
           col("sample_id", String(36), unique=True), ref("owner_id", "users.user_id"),
           col("state", String(16)), col("declared_at", timestamp),
@@ -51,6 +59,8 @@ def build_schema():
           col("declaration", JSON))
     table("samples", col("sample_id", String(36), primary_key=True),
           ref("owner_id", "users.user_id"), ref("upload_id", "uploads.upload_id", unique=True),
+          col("batch_id", String(64), nullable=True), col("batch_snapshot", JSON, nullable=True),
+          col("latitude", Float, nullable=True), col("longitude", Float, nullable=True), col("location_accuracy_m", Float, nullable=True),
           col("tree_id", String(64), nullable=True), col("original_cultivar_id", String(64)),
           col("original_cultivar_name", String(128)), col("original_part", String(16)),
           col("original_class_id", String(128)), col("original_class_name", String(128)),
@@ -86,7 +96,8 @@ def build_schema():
     table("export_items", ref("export_id", "exports.export_id", primary_key=True),
           ref("image_id", "images.image_id", primary_key=True), ref("sample_id", "samples.sample_id"),
           col("sort_index", Integer), col("file_name", String(128)), col("file_key", String(512), nullable=True),
-          col("class_id", String(128)), col("class_name", String(128), nullable=True), col("sha256", String(64)))
+          col("class_id", String(128)), col("class_name", String(128), nullable=True), col("sha256", String(64)),
+          col("collection_metadata", JSON, nullable=True))
     table("idempotency", col("key_hash", String(64), primary_key=True),
           col("request_hash", String(64)), ref("export_id", "exports.export_id"))
 

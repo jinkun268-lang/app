@@ -24,6 +24,16 @@
         </div>
       </div>
 
+      <div v-if="detail.batch_snapshot || detail.latitude != null" class="grid2">
+        <div v-if="detail.batch_snapshot" class="info-block"><div class="info-label">采集批次（上传时信息）</div>
+          <router-link :to="{path:'/samples', query:{batch_id:detail.batch_id}}">{{ detail.batch_snapshot.name }}</router-link>
+          <div>{{ detail.batch_snapshot.place || '未填写地点' }} · {{ detail.batch_snapshot.collector || '未填写采集人' }}</div>
+          <div class="muted">{{ detail.batch_snapshot.note }}</div>
+        </div>
+        <div v-if="detail.latitude != null && detail.longitude != null" class="info-block"><div class="info-label">拍摄定位</div>
+          <div>{{ detail.latitude }}, {{ detail.longitude }}</div><div v-if="detail.location_accuracy_m != null" class="muted">精度约 {{ detail.location_accuracy_m }} 米</div>
+        </div>
+      </div>
       <div class="compare card">
         <div class="compare-col">
           <div class="info-label">初步（采集端填写）</div>

@@ -15,6 +15,8 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,12 +34,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,6 +61,10 @@ import com.example.citruscollect.data.entity.ImageEntity
 import com.example.citruscollect.ui.LocalAppContainer
 import com.example.citruscollect.ui.theme.CitrusColors
 import com.example.citruscollect.util.UuidV7
+import com.example.citruscollect.util.GeoFix
+import com.example.citruscollect.util.locateForCapture
+import com.example.citruscollect.util.photoQualityWarning
+import android.os.SystemClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -89,7 +98,7 @@ fun CaptureHomeScreen(
     val batch = batches.firstOrNull { it.batchId == container.batchId }
     val batchCount = all.count { it.batchId == container.batchId }
 
-    Column(Modifier.fillMaxSize().background(CitrusColors.Screen)) {
+    Column(Modifier.fillMaxSize().background(CitrusColors.Screen).verticalScroll(rememberScrollState())) {
         Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 12.dp)) {
             Text("开始采集", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = CitrusColors.Ink)
             Text("连续拍摄，不打断采集节奏", fontSize = 11.sp, color = CitrusColors.Muted,
@@ -108,7 +117,7 @@ fun CaptureHomeScreen(
                         color = CitrusColors.Ink)
                     Text(
                         if (batch == null) "先去“采集批次”新建，再开始连续拍摄"
-                        else "${batch.place.ifBlank { "未填写地点" }} · $batchCount 张图片",
+                        else "${batch.place.ifBlank { "未填写地点" }} · $batchCount 张图片${if (batch.closed) " · 已关闭，请切换批次" else ""}",
                         fontSize = 10.sp, color = Color(0xFF7C8875), modifier = Modifier.padding(top = 2.dp)
                     )
                 }
@@ -151,7 +160,9 @@ fun CaptureHomeScreen(
                 Surface(
                     color = Color(0xFFF4F3E5),
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().padding(top = 20.dp).clickable(onClick = onStartCapture)
+                    modifier = Modifier.fillMaxWidth().padding(top = 20.dp).clickable(onClick = {
+                        if (batch?.closed == true || batch == null) onOpenBatches() else onStartCapture()
+                    })
                 ) {
                     Text("开始连续拍摄", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = CitrusColors.Green,
                         textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 13.dp))
@@ -203,6 +214,8 @@ fun CaptureSessionScreen(
     val context = LocalContext.current
     val container = LocalAppContainer.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
+    val ownerKey by container.authRepository.ownerKey.collectAsState(initial = null)
     val retaking = retakeSampleId != null && retakeImageId != null
     var session by rememberSaveable(retakeSampleId) { mutableStateOf(listOf<String>()) }
 
@@ -214,6 +227,24 @@ fun CaptureSessionScreen(
     var cameraReady by remember { mutableStateOf(false) }
     var captureInProgress by remember { mutableStateOf(false) }
     var captureError by remember { mutableStateOf<String?>(null) }
+    var qualityNotice by remember { mutableStateOf<Pair<String?, String>?>(null) }
+    var position by remember { mutableStateOf<GeoFix?>(null) }
+    var locating by remember { mutableStateOf(false) }
+    var locationMessage by remember { mutableStateOf("可选：记录拍摄位置") }
+    fun requestPosition() {
+        locating = true
+        scope.launch {
+            try {
+                position = withContext(Dispatchers.IO) { locateForCapture(context) }
+                locationMessage = position?.let { "已定位 ±${it.accuracyM.toInt()}m（2分钟内有效）" }
+                    ?: "未取得有效定位，仍可拍摄并手填批次地点"
+            } finally { locating = false }
+        }
+    }
+    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+        if (permissions.values.any { it }) requestPosition()
+        else { position = null; locationMessage = "未授权定位，仍可拍摄并手填批次地点" }
+    }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed ->
         granted = allowed
         if (!allowed) captureError = "未授予相机权限，无法拍摄"
@@ -226,6 +257,18 @@ fun CaptureSessionScreen(
     val batch = batches.firstOrNull { it.batchId == container.batchId }
 
     LaunchedEffect(Unit) { if (!granted) launcher.launch(Manifest.permission.CAMERA) }
+
+    qualityNotice?.let { (recordId, warning) ->
+        AlertDialog(
+            onDismissRequest = { qualityNotice = null },
+            title = { Text("照片已保存，请检查拍摄质量") },
+            text = { Text("$warning\n这是本地拍摄建议，不是病害诊断；原图已保留。") },
+            confirmButton = { TextButton(onClick = { qualityNotice = null }) { Text("保留并继续") } },
+            dismissButton = { if (recordId != null) TextButton(onClick = {
+                qualityNotice = null; onOpenRecord(recordId)
+            }) { Text("查看并重拍") } }
+        )
+    }
 
     Column(Modifier.fillMaxSize().background(Color(0xFF183323))) {
         Row(
@@ -248,6 +291,18 @@ fun CaptureSessionScreen(
             }
         }
 
+        Row(Modifier.fillMaxWidth().background(Color(0xFF244532)).padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(if (locating) "正在定位，可继续拍摄…" else locationMessage,
+                fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1f))
+            TextButton(enabled = !locating, onClick = {
+                locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            }) { Text("获取定位", color = Color.White, fontSize = 10.sp) }
+            if (position != null) TextButton(onClick = { position = null; locationMessage = "不记录位置" }) {
+                Text("清除", color = Color.White, fontSize = 10.sp)
+            }
+        }
+
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (granted) {
                 CameraPreview(imageCapture, lifecycleOwner, Modifier.fillMaxSize(),
@@ -256,7 +311,7 @@ fun CaptureSessionScreen(
                 Text("需要相机权限才能拍摄", color = Color.White, modifier = Modifier.align(Alignment.Center))
             }
             Text(
-                "${labels().second} · ${labels().first} · 默认品种 胡柚",
+                "${labels().second} · ${batch?.name ?: "历史记录"}${if (batch?.closed == true) " · 批次已关闭" else ""}",
                 fontSize = 11.sp, color = Color(0xFFE2E9D8),
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 15.dp)
             )
@@ -301,15 +356,18 @@ fun CaptureSessionScreen(
             Box(
                 Modifier.size(63.dp).clip(CircleShape)
                     .background(Color.White)
-                    .clickable(enabled = granted && cameraReady && !captureInProgress) {
+                    .clickable(enabled = granted && cameraReady && !captureInProgress && ownerKey != null && (retaking || batch?.closed != true)) {
                         captureInProgress = true
                         captureError = null
                         shoot(context, container, imageCapture, retakeSampleId, retakeImageId,
-                            container.batchId, batch?.defaultCultivarId ?: "unknown") { result ->
+                            container.batchId, batch?.defaultCultivarId ?: "unknown",
+                            ownerKey, position?.takeIf { it.usableAt(SystemClock.elapsedRealtime()) }) { result, warning, error ->
                             if (result != null) {
                                 if (retakeSampleId != null) onCaptured(retakeSampleId)
                                 else session = session + result
                             }
+                            captureError = error
+                            if (warning != null && !retaking) qualityNotice = result to warning
                             captureInProgress = false
                         }
                     },
@@ -337,7 +395,9 @@ private fun shoot(
     retakeImageId: String?,
     batchId: String?,
     cultivarId: String,
-    onSaved: (String?) -> Unit
+    expectedOwnerKey: String?,
+    position: GeoFix?,
+    onSaved: (String?, String?, String?) -> Unit
 ) {
     val file = File(context.filesDir, "capture_${UuidV7.generate()}.jpg")
     imageCapture.takePicture(
@@ -346,32 +406,42 @@ private fun shoot(
         object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                 container.appScope.launch {
+                    var persisted = false
                     try {
+                        if (expectedOwnerKey == null || container.authRepository.currentOwnerKey() != expectedOwnerKey)
+                            throw IllegalStateException("拍摄期间账号已切换，请重新拍摄")
                         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                         BitmapFactory.decodeFile(file.absolutePath, bounds)
+                        val quality = runCatching { photoQualityWarning(file) }.getOrElse { "质量检查暂不可用，请打开原图确认" }
                         val id = if (retakeSampleId != null && retakeImageId != null) {
                             container.repository.replaceImage(
-                                retakeSampleId, retakeImageId, file, bounds.outWidth, bounds.outHeight
+                                retakeSampleId, retakeImageId, file, bounds.outWidth, bounds.outHeight,
+                                latitude = position?.latitude, longitude = position?.longitude,
+                                locationAccuracyM = position?.accuracyM, qualityWarning = quality
                             )
                             null
                         } else {
                             container.repository.capturePhoto(
                                 file = file, mimeType = "image/jpeg",
                                 width = bounds.outWidth, height = bounds.outHeight,
-                                batchId = batchId, cultivarId = cultivarId
+                                batchId = batchId, cultivarId = cultivarId,
+                                latitude = position?.latitude, longitude = position?.longitude,
+                                locationAccuracyM = position?.accuracyM, qualityWarning = quality,
+                                expectedOwnerKey = expectedOwnerKey
                             )
                         }
-                        withContext(Dispatchers.Main) { onSaved(id) }
+                        persisted = true
+                        withContext(Dispatchers.Main) { onSaved(id, quality, null) }
                     } catch (e: Exception) {
-                        file.delete()
-                        withContext(Dispatchers.Main) { onSaved(null) }
+                        if (!persisted) file.delete()
+                        withContext(Dispatchers.Main) { onSaved(null, null, e.message ?: "照片保存失败，请重试") }
                     }
                 }
             }
 
             override fun onError(exc: ImageCaptureException) {
                 file.delete()
-                onSaved(null)
+                onSaved(null, null, "拍摄失败，请重试")
             }
         }
     )

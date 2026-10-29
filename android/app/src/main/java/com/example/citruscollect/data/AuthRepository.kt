@@ -11,6 +11,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -38,6 +39,17 @@ class AuthRepository(
 ) {
     val username: Flow<String?> = session.username
     val token: Flow<String?> = session.token
+    val ownerKey: Flow<String?> = session.account.distinctUntilChanged()
+    suspend fun currentOwnerKey(): String? = stateMutex.withLock {
+        if (session.accessToken() == null) null else session.baseUrlValue()?.let { url ->
+            session.username.first()?.let { accountKey(url, it) }
+        }
+    }
+    suspend fun <T> authorizedFor(owner: String, block: suspend (Backend.Services, String) -> T): T =
+        authorizedServices(expectedOwner = owner, block = block)
+    companion object {
+        fun accountKey(url: String, username: String): String = url.trim().trimEnd('/') + "/\n" + username
+    }
 
     private sealed interface RefreshOutcome {
         data class Renewed(val accessToken: String) : RefreshOutcome
@@ -185,11 +197,15 @@ class AuthRepository(
      * 永久认证拒绝（非过期 AUTH_INVALID、账号停用、重放后再拒）仅清理匹配的
      * 当前会话；普通 403 不清理；临时刷新失败保留凭据并保留原错误。
      */
-    suspend fun <T> authorizedServices(block: suspend (services: Backend.Services, token: String) -> T): T {
+    suspend fun <T> authorizedServices(expectedOwner: String? = null, block: suspend (services: Backend.Services, token: String) -> T): T {
         restorePersistedBaseUrl()
         val (myEpoch, baseUrl, initialToken) = stateMutex.withLock {
             val url = session.baseUrlValue()
             val token = session.accessToken() ?: throw AuthExpiredException("未登录")
+            if (expectedOwner != null) {
+                val user = session.username.first()
+                if (url == null || user == null || accountKey(url, user) != expectedOwner) throw AuthExpiredException("账号已切换，原账号任务已暂停")
+            }
             Triple(epoch, url, token)
         }
         val services = serviceSnapshotFor(baseUrl)
