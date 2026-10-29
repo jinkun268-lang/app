@@ -172,6 +172,7 @@ def _summary(sample: dict[str, Any]) -> dict[str, Any]:
     return {
         "sample_id": sample["sample_id"],
         "tree_id": sample["tree_id"],
+        **{key: sample.get(key) for key in ("batch_id", "batch_snapshot", "latitude", "longitude", "location_accuracy_m")},
         "original_cultivar_id": sample["original_cultivar_id"],
         "original_cultivar_name": sample["original_cultivar_name"],
         "original_part": sample["original_part"],
@@ -201,6 +202,7 @@ def list_samples(
     excluded: bool | None = Query(default=None),
     final_cultivar_id: str | None = Query(default=None),
     final_class_id: str | None = Query(default=None),
+    batch_id: str | None = Query(default=None, max_length=64),
     uploaded_from: date | None = Query(default=None, description="北京时间整日 YYYY-MM-DD"),
     uploaded_to: date | None = Query(default=None, description="北京时间整日 YYYY-MM-DD"),
     q: str | None = Query(default=None, max_length=36, description="sample_id 精确或 tree_id 前缀"),
@@ -226,7 +228,7 @@ def list_samples(
     upper = beijing_day_bound(uploaded_to, end=True) if uploaded_to else None
     needle = (q or "").strip().lower()
 
-    filters = SampleFilter(review_statuses=tuple(statuses) if statuses is not None else None,
+    filters = SampleFilter(batch_id=batch_id, review_statuses=tuple(statuses) if statuses is not None else None,
                            excluded=excluded, final_cultivar_id=final_cultivar_id,
                            final_class_id=final_class_id, uploaded_from=lower,
                            uploaded_to=upper, query=needle,

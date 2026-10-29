@@ -207,6 +207,7 @@ def _snapshot_items(store: DataTransaction, payload: ExportCreateIn, limits: Ser
                     "file_name": f"{image['image_id']}.{ext}",
                     "class_id": class_id,
                     "class_name": class_name,
+                    "collection_metadata": {key: sample.get(key) for key in ("batch_id", "batch_snapshot", "latitude", "longitude", "location_accuracy_m")},
                     # 冻结原图相对键与 SHA：之后上传/审核变化不影响已建批次。
                     "file_key": image.get("file_key"),
                     "sha256": image.get("sha256"),
@@ -307,6 +308,15 @@ def _write_zip(archive: zipfile.ZipFile, files: FileStorage, items: list[dict[st
         [[item["image_id"], item["sample_id"], item["file_name"], item["class_id"]] for item in items],
     )
     archive.writestr(_zip_entry("labels.csv", snapshot_at, zipfile.ZIP_DEFLATED), labels)
+    metadata_rows = []
+    for item in items:
+        meta = item.get("collection_metadata") or {}
+        batch = meta.get("batch_snapshot") or {}
+        metadata_rows.append([item["image_id"], item["sample_id"], meta.get("batch_id") or "",
+                              batch.get("name") or "", batch.get("place") or "", batch.get("collector") or "",
+                              *("" if meta.get(key) is None else str(meta[key]) for key in ("latitude", "longitude", "location_accuracy_m"))])
+    archive.writestr(_zip_entry("collection.csv", snapshot_at, zipfile.ZIP_DEFLATED),
+                     _csv_bytes(["image_id", "sample_id", "batch_id", "batch_name", "place", "collector", "latitude", "longitude", "location_accuracy_m"], metadata_rows))
     classes = sorted({(item["class_id"], item["class_name"] or item["class_id"]) for item in items})
     archive.writestr(
         _zip_entry("classes.csv", snapshot_at, zipfile.ZIP_DEFLATED),

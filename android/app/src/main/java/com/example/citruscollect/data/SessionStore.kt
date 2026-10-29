@@ -15,6 +15,9 @@ interface SessionStore {
     val username: Flow<String?>
     val token: Flow<String?>
     val role: Flow<String?>
+    val account: Flow<String?> get() = kotlinx.coroutines.flow.combine(baseUrl, username, token) { url, user, access ->
+        if (url == null || user == null || access == null) null else AuthRepository.accountKey(url, user)
+    }
     val baseUrl: Flow<String?>
 
     suspend fun accessToken(): String?
@@ -53,6 +56,10 @@ class DataStoreSessionStore(private val context: Context) : SessionStore {
     // 读缓存回填与写入/清空串行化：clear 之后再完成的迟到读不会把旧值重新填回内存缓存。
     private val storeMutex = Mutex()
 
+    override val account: Flow<String?> = context.dataStore.data.map { values ->
+        val url = values[KEY_BASE_URL]; val user = values[KEY_USERNAME]
+        if (url == null || user == null || values[KEY_ACCESS] == null) null else AuthRepository.accountKey(url, user)
+    }
     override val username: Flow<String?> = context.dataStore.data.map { it[KEY_USERNAME] }
     override val token: Flow<String?> = context.dataStore.data.map { it[KEY_ACCESS] }
     override val role: Flow<String?> = context.dataStore.data.map { it[KEY_ROLE] }

@@ -156,6 +156,34 @@ fun ConfirmScreen(sampleId: String, onBack: () -> Unit, onSaved: () -> Unit, onR
             OutlinedButton(enabled = editable && !busy, onClick = { confirmDiscard = true }) { Text("删除") }
         }
 
+        sample?.let { record ->
+            if (record.captureQualityWarning != null || record.latitude != null) {
+                Surface(shape = MaterialTheme.shapes.medium, tonalElevation = 1.dp, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                    Column(Modifier.padding(12.dp)) {
+                        record.captureQualityWarning?.let {
+                            Text("拍摄质量提醒", style = MaterialTheme.typography.titleSmall)
+                            Text(it)
+                            Text("此提醒仅供采集参考，原图已保留。", style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (record.latitude != null && record.longitude != null) {
+                            Text("拍摄定位：${record.latitude}, ${record.longitude}")
+                            record.locationAccuracyM?.let { Text("定位精度约 ±${it.toInt()} 米", style = MaterialTheme.typography.bodySmall) }
+                        }
+                    }
+                }
+            }
+        }
+        if (sample?.uploadState == "uploaded") {
+            ReviewFeedback(sample?.reviewJson, busy) {
+                busy = true; error = null
+                scope.launch {
+                    try { container.repository.refreshReview(sampleId) }
+                    catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { error = e.message ?: "核验结果刷新失败" }
+                    finally { busy = false }
+                }
+            }
+        }
         Spacer(Modifier.height(12.dp))
         if (dictionaryError != null) {
             Text(dictionaryError.orEmpty(), color = MaterialTheme.colorScheme.error)
@@ -213,7 +241,7 @@ fun ConfirmScreen(sampleId: String, onBack: () -> Unit, onSaved: () -> Unit, onR
                         scope.launch {
                             try {
                                 container.repository.saveConfirm(sampleId, cultivar, part, classId, symptoms, note)
-                                container.repository.upload(sampleId)
+                                container.repository.enqueueUpload(sampleId)
                                 onSaved()
                             } catch (e: CancellationException) {
                                 throw e
@@ -225,7 +253,7 @@ fun ConfirmScreen(sampleId: String, onBack: () -> Unit, onSaved: () -> Unit, onR
                         }
                     },
                     modifier = Modifier.weight(1f)
-                ) { Text(if (busy) "处理中…" else "保存并上传") }
+                ) { Text(if (busy) "处理中…" else "保存并加入队列") }
             } else {
                 OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("返回列表") }
             }

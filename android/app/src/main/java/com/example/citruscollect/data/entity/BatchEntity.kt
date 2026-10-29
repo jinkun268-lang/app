@@ -16,5 +16,7 @@ data class BatchEntity(
     val defaultCultivarId: String = "unknown",
     val note: String = "",
     val closed: Boolean = false,
+    val ownerKey: String? = null,
+    @androidx.room.ColumnInfo(defaultValue = "1") val syncPending: Boolean = true,
     val createdAt: Long = System.currentTimeMillis()
 )

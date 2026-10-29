@@ -22,6 +22,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import com.example.citruscollect.network.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -43,23 +46,34 @@ class SampleRepository(
     private val authRepository: AuthRepository
 ) {
     private val uploadMutex = Mutex()
+    var uploadResumeScheduler: (suspend (String, String) -> Unit)? = null
+    var uploadScheduler: (suspend (String, String) -> Unit)? = null
+    private suspend fun owner(): String = authRepository.currentOwnerKey() ?: throw AuthExpiredException("请先登录")
+    private suspend fun ownedSample(id: String): SampleEntity {
+        val sample = sampleDao.byId(id) ?: throw UploadException("记录不存在")
+        if (sample.ownerKey == null || sample.ownerKey != owner()) throw UploadException("该记录不属于当前账号；旧版无主数据已隔离保留")
+        return sample
+    }
+    private fun scoped(flow: Flow<List<SampleEntity>>) = combine(flow, authRepository.ownerKey) { rows, key -> rows.filter { key != null && it.ownerKey == key } }
 
-    fun observePending(): Flow<List<SampleEntity>> = sampleDao.observePending()
-    fun observeUploaded(): Flow<List<SampleEntity>> = sampleDao.observeUploaded()
-    fun observePendingCount(): Flow<Int> = sampleDao.observePendingCount()
-    fun imagesOf(sampleId: String): Flow<List<ImageEntity>> = imageDao.bySample(sampleId)
-    fun sampleById(sampleId: String): Flow<SampleEntity?> = sampleDao.observeById(sampleId)
+
+    fun observeLegacyCount(): Flow<Int> = sampleDao.observeLegacyCount()
+    fun observePending(): Flow<List<SampleEntity>> = scoped(sampleDao.observePending())
+    fun observeUploaded(): Flow<List<SampleEntity>> = scoped(sampleDao.observeUploaded())
+    fun observePendingCount(): Flow<Int> = combine(sampleDao.observePending(), authRepository.ownerKey) { rows, key -> rows.count { key != null && it.ownerKey == key } }
+    fun imagesOf(sampleId: String): Flow<List<ImageEntity>> = combine(imageDao.bySample(sampleId), sampleById(sampleId)) { images, sample -> if (sample == null) emptyList() else images }
+    fun sampleById(sampleId: String): Flow<SampleEntity?> = combine(sampleDao.observeById(sampleId), authRepository.ownerKey) { sample, key -> sample?.takeIf { key != null && it.ownerKey == key } }
 
     suspend fun recognizeImage(imageId: String): RecognitionResult {
-        val image = uploadMutex.withLock {
+        val (image, recognitionOwner) = uploadMutex.withLock {
             val current = imageDao.byId(imageId) ?: throw UploadException("照片不存在")
             requireEditable(current.sampleId)
-            current
+            current to ownedSample(current.sampleId).ownerKey!!
         }
         withContext(Dispatchers.IO) {
             if (sha256Streaming(File(image.filePath)) != image.sha256) throw UploadException("照片已变更，请重新打开后识别")
         }
-        suspend fun request() = authRepository.authorizedServices { services, token ->
+        suspend fun request() = authRepository.authorizedFor(recognitionOwner) { services, token ->
             services.recognition.recognize("Bearer $token", imageId, File(image.filePath).asRequestBody(image.mimeType.toMediaType()))
         }
         val result = try { request() } catch (_: IOException) { request() }
@@ -104,17 +118,17 @@ class SampleRepository(
 
     suspend fun saveDraftMetadata(sampleId: String, cultivar: String, part: String, classId: String, symptoms: String, note: String) = uploadMutex.withLock {
         requireEditable(sampleId)
-        val source = sampleDao.byId(sampleId) ?: throw UploadException("记录不存在")
+        val source = ownedSample(sampleId)
         sampleDao.update(source.copy(cultivarId = cultivar, part = part, classId = classId, symptoms = symptoms, note = note))
     }
 
     /** Server withdrawal is idempotent. Retain local originals and give the editable copy fresh declaration IDs. */
     suspend fun withdraw(sampleId: String): String = uploadMutex.withLock {
-        val sample = sampleDao.byId(sampleId) ?: throw UploadException("记录不存在")
+        val sample = ownedSample(sampleId)
         if (sample.uploadState != "uploaded") throw UploadException("只有已上传记录可以撤回")
         val images = imageDao.bySampleList(sampleId)
         images.forEach { if (!File(it.filePath).isFile) throw UploadException("本地照片缺失，无法保留可编辑副本") }
-        suspend fun withdrawOnce() = authRepository.authorizedServices { services, token -> services.upload.withdraw("Bearer $token", sampleId) }
+        suspend fun withdrawOnce() = authRepository.authorizedFor(sample.ownerKey!!) { services, token -> services.upload.withdraw("Bearer $token", sampleId) }
         // This specific command is idempotent, so a lost response or stale connection may be retried once.
         val response = try { withdrawOnce() } catch (_: IOException) { withdrawOnce() }
         if (response.sample_id != sampleId || response.state != "withdrawn") throw UploadException("撤回回执与记录不一致")
@@ -137,6 +151,7 @@ class SampleRepository(
         sampleDao.insert(
             SampleEntity(
                 sampleId = id,
+                ownerKey = owner(),
                 cultivarId = cultivarId,
                 part = part,
                 classId = classId,
@@ -159,9 +174,16 @@ class SampleRepository(
         viewType: String = "close_up",
         capturedAt: Long = System.currentTimeMillis(),
         batchId: String? = null,
-        cultivarId: String = "unknown"
+        cultivarId: String = "unknown",
+        latitude: Double? = null, longitude: Double? = null, locationAccuracyM: Double? = null, qualityWarning: String? = null, expectedOwnerKey: String? = null
     ): String = uploadMutex.withLock {
         if (!file.isFile || file.length() == 0L || width <= 0 || height <= 0) throw UploadException("照片保存失败，不会创建空记录")
+        val captureOwner = owner()
+        if (expectedOwnerKey != null && captureOwner != expectedOwnerKey) throw AuthExpiredException("拍摄期间账号已切换，请重新拍摄")
+        if (batchId != null) {
+            val batch = sampleDao.batchById(batchId) ?: throw UploadException("批次不存在")
+            if (batch.ownerKey != captureOwner || batch.closed) throw UploadException("批次已关闭或不属于当前账号")
+        }
         val sampleId = UuidV7.generate()
         val image = withContext(Dispatchers.IO) {
             ImageEntity(
@@ -179,23 +201,25 @@ class SampleRepository(
         }
         val sample = SampleEntity(
             sampleId = sampleId,
+            ownerKey = captureOwner, latitude = latitude, longitude = longitude, locationAccuracyM = locationAccuracyM, captureQualityWarning = qualityWarning,
             cultivarId = cultivarId,
             part = "leaf",
             classId = "unknown",
             batchId = batchId,
             createdAt = capturedAt
         )
+        if (owner() != captureOwner) throw AuthExpiredException("拍摄期间账号已切换，请重新拍摄")
         withContext(Dispatchers.IO + NonCancellable) { imageDao.addCapturedImage(image, sample) }
         sampleId
     }
 
     // ---- 本地采集批次 ----
 
-    fun observeBatches(): Flow<List<BatchEntity>> = sampleDao.observeBatches()
+    fun observeBatches(): Flow<List<BatchEntity>> = combine(sampleDao.observeBatches(), authRepository.ownerKey) { rows, key -> rows.filter { key != null && it.ownerKey == key } }
 
-    suspend fun latestBatch(): BatchEntity? = sampleDao.latestBatch()
+    suspend fun latestBatch(): BatchEntity? = observeBatches().first().firstOrNull { !it.closed }
 
-    fun batchCount(batchId: String): Flow<Int> = sampleDao.observeBatchCount(batchId)
+    fun batchCount(batchId: String): Flow<Int> = combine(sampleDao.observePending(), sampleDao.observeUploaded(), authRepository.ownerKey) { a, b, key -> (a + b).count { key != null && it.ownerKey == key && it.batchId == batchId } }
 
     /** 新建本地批次并返回它的 id；批次只承载共同信息，不上传。 */
     suspend fun createBatch(
@@ -208,6 +232,7 @@ class SampleRepository(
         sampleDao.insertBatch(
             BatchEntity(
                 batchId = id,
+                ownerKey = owner(),
                 name = name.ifBlank { "未命名采集" },
                 place = place.trim(),
                 collector = collector.trim(),
@@ -219,7 +244,7 @@ class SampleRepository(
 
     /** 放弃一条还没开始上传的记录，本地原图一并删除；已声明或已上传的记录只能撤回。 */
     suspend fun discardRecord(sampleId: String): Boolean = uploadMutex.withLock {
-        val sample = sampleDao.byId(sampleId) ?: return@withLock false
+        val sample = ownedSample(sampleId)
         if (sample.uploadId != null || sample.uploadState == "uploaded") {
             throw UploadException("已开始上传的记录不能放弃，请在已上传记录里撤回")
         }
@@ -244,7 +269,7 @@ class SampleRepository(
     ): String = uploadMutex.withLock {
         if (!file.isFile || file.length() == 0L || width <= 0 || height <= 0) throw UploadException("照片保存失败，不会创建空记录")
         val newSample = if (createIfMissing && sampleDao.byId(sampleId) == null) {
-            SampleEntity(sampleId = sampleId, cultivarId = "unknown", part = "leaf", classId = "unknown")
+            SampleEntity(sampleId = sampleId, ownerKey = owner(), cultivarId = "unknown", part = "leaf", classId = "unknown")
         } else { requireEditable(sampleId); null }
         if (imageDao.bySampleList(sampleId).size >= MAX_IMAGES) throw UploadException("每份对象最多 12 张图，请先删除或重拍")
         val id = UuidV7.generate()
@@ -266,13 +291,13 @@ class SampleRepository(
     }
 
     private suspend fun requireEditable(sampleId: String) {
-        val sample = sampleDao.byId(sampleId) ?: throw UploadException("对象不存在")
+        val sample = ownedSample(sampleId)
         if (sample.uploadId != null || sample.uploadState !in setOf("draft", "pending", "failed", "needs_photos")) {
             throw UploadException("已开始上传的照片不能修改，请新建采集记录")
         }
     }
 
-    suspend fun cleanupAbandonedEmptyDrafts(): Int = uploadMutex.withLock { sampleDao.deleteAbandonedEmptyDrafts() }
+    suspend fun cleanupAbandonedEmptyDrafts(): Int = 0 // 旧版无主数据原样保留，不自动清理。
 
     suspend fun deleteImage(imageId: String, deleteRecordIfLast: Boolean = false): Boolean = uploadMutex.withLock {
         val image = imageDao.byId(imageId) ?: throw UploadException("照片不存在")
@@ -285,7 +310,7 @@ class SampleRepository(
     }
 
     /** 新文件完整写入并校验后才替换记录；保留原照片的 ID 与视角。 */
-    suspend fun replaceImage(sampleId: String, imageId: String, file: File, width: Int, height: Int) = uploadMutex.withLock {
+    suspend fun replaceImage(sampleId: String, imageId: String, file: File, width: Int, height: Int, latitude: Double? = null, longitude: Double? = null, locationAccuracyM: Double? = null, qualityWarning: String? = null) = uploadMutex.withLock {
         requireEditable(sampleId)
         val old = imageDao.byId(imageId)?.takeIf { it.sampleId == sampleId }
             ?: throw UploadException("待重拍照片不存在")
@@ -295,13 +320,15 @@ class SampleRepository(
             val replacement = old.copy(filePath = file.absolutePath, width = width, height = height,
                 mimeType = "image/jpeg", fileSize = file.length(), sha256 = sha256Streaming(file),
                 capturedAt = System.currentTimeMillis(), recognitionJson = null)
+            val sample = ownedSample(sampleId)
+            sampleDao.update(sample.copy(latitude = latitude, longitude = longitude, locationAccuracyM = locationAccuracyM, captureQualityWarning = qualityWarning))
             imageDao.update(replacement)
             File(old.filePath).delete()
         }
     }
 
     suspend fun setUploadState(sampleId: String, state: String) {
-        sampleDao.byId(sampleId)?.let { sampleDao.update(it.copy(uploadState = state)) }
+        ownedSample(sampleId).let { sampleDao.update(it.copy(uploadState = state)) }
     }
 
     suspend fun updateViewType(imageId: String, viewType: String) = uploadMutex.withLock {
@@ -339,7 +366,7 @@ class SampleRepository(
      * 串行互斥避免双击重复；成功仅凭服务端 complete 回执；失败保留待传并记录错误。
      */
     suspend fun upload(sampleId: String): UploadOutcome = uploadMutex.withLock {
-        val sample = sampleDao.byId(sampleId) ?: throw UploadException("对象不存在")
+        val sample = ownedSample(sampleId)
         if (sample.uploadState == "uploaded") {
             throw UploadException("该对象已上传")
         }
@@ -360,11 +387,13 @@ class SampleRepository(
             classId = sample.classId,
             symptoms = sample.symptoms.ifBlank { null },
             note = sample.note.ifBlank { null },
+            batchId = sample.batchId, latitude = sample.latitude, longitude = sample.longitude, locationAccuracyM = sample.locationAccuracyM,
             images = images.map { image -> image.toUploadImage() }
         )
 
         return try {
-            val outcome = authRepository.authorizedServices { services, token ->
+            sample.batchId?.let { syncOneBatch(it, sample.ownerKey!!) }
+            val outcome = authRepository.authorizedFor(sample.ownerKey!!) { services, token ->
                 // 认证刷新会重放整个编排：每次执行都读取当前已持久化的 uploadId，
                 // 不使用闭包捕获的旧 sample.uploadId，避免重复创建上传会话。
                 val currentUploadId = sampleDao.byId(sampleId)?.uploadId
@@ -384,7 +413,7 @@ class SampleRepository(
             withContext(NonCancellable) {
                 val latest = sampleDao.byId(sampleId) ?: sample
                 if (latest.uploadState == "uploading") {
-                    sampleDao.update(latest.copy(uploadState = "failed", uploadError = null))
+                    sampleDao.update(latest.copy(uploadState = if (sample.uploadState in setOf("queued", "retrying", "uploading")) "queued" else "failed", uploadError = null))
                 }
             }
             throw e
@@ -397,9 +426,103 @@ class SampleRepository(
             android.util.Log.w("CitrusUpload", "Upload failed (${e.javaClass.simpleName})", e)
             val message = friendlyMessage(e)
             val latest = sampleDao.byId(sampleId) ?: sample
-            sampleDao.update(latest.copy(uploadState = "failed", uploadError = message))
+            val retryable = sample.uploadState in setOf("queued", "retrying", "uploading") && (e is AuthExpiredException || e is IOException || (e is HttpException && (e.code() == 429 || e.code() >= 500)))
+            sampleDao.update(latest.copy(uploadState = if (retryable) "retrying" else "failed", uploadError = message))
             throw UploadException(message, e)
         }
+    }
+
+    suspend fun enqueueUpload(sampleId: String) {
+        val sample = ownedSample(sampleId)
+        if (sample.uploadState !in setOf("pending", "failed", "queued", "retrying", "uploading")) throw UploadException("请先确认采集信息")
+        val schedule = uploadScheduler ?: throw UploadException("后台上传尚未初始化")
+        if (sample.uploadState !in setOf("queued", "retrying", "uploading")) sampleDao.update(sample.copy(uploadState = "queued", uploadError = null))
+        schedule(sampleId, sample.ownerKey!!)
+    }
+    suspend fun resumeQueuedUploads() {
+        val key = owner()
+        observePending().first().filter { it.uploadState in setOf("queued", "retrying", "uploading") }
+            .forEach { (uploadResumeScheduler ?: uploadScheduler)?.invoke(it.sampleId, key) }
+    }
+    internal suspend fun queueState(sampleId: String, expectedOwner: String, state: String) {
+        val sample = sampleDao.byId(sampleId) ?: return
+        if (sample.ownerKey == expectedOwner && sample.uploadState != "uploaded") sampleDao.update(sample.copy(uploadState = state))
+    }
+    suspend fun enqueuePendingUploads(): Int {
+        val records = observePending().first().filter { it.uploadState in setOf("pending", "failed", "queued", "retrying", "uploading") }
+        records.forEach { enqueueUpload(it.sampleId) }
+        return records.size
+    }
+    suspend fun updateBatch(batchId: String, name: String, place: String, collector: String, defaultCultivarId: String, note: String = "") = uploadMutex.withLock {
+        val row = ownedBatch(batchId)
+        require(name.isNotBlank() && name.length <= 128) { "请填写批次名称（不超过128字）" }
+        sampleDao.updateBatch(row.copy(name = name.trim(), place = place.trim(), collector = collector.trim(), defaultCultivarId = defaultCultivarId, note = note, syncPending = true))
+    }
+    suspend fun setBatchClosed(batchId: String, closed: Boolean) = uploadMutex.withLock {
+        sampleDao.updateBatch(ownedBatch(batchId).copy(closed = closed, syncPending = true))
+    }
+    private suspend fun ownedBatch(id: String): BatchEntity {
+        val row = sampleDao.batchById(id) ?: throw UploadException("批次不存在")
+        if (row.ownerKey == null || row.ownerKey != owner()) throw UploadException("批次不属于当前账号")
+        return row
+    }
+    private fun BatchEntity.dto() = BatchRequest(name = name, place = place, collector = collector, default_cultivar_id = defaultCultivarId, note = note, closed = closed, created_at = java.time.Instant.ofEpochMilli(createdAt).toString())
+    private suspend fun syncOneBatch(id: String, key: String) {
+        val local = ownedBatch(id)
+        if (!local.syncPending) return
+        authRepository.authorizedFor(key) { services, token -> requireNotNull(services.collection).putBatch("Bearer $token", id, local.dto()) }
+        if (owner() != key) throw AuthExpiredException("账号已切换")
+        // 编辑可能在网络期间发生；只确认实际发送过的版本。
+        if (sampleDao.batchById(id) == local) sampleDao.updateBatch(local.copy(syncPending = false))
+    }
+    suspend fun syncBatches(): Int {
+        val key = owner()
+        observeBatches().first().filter { it.syncPending }.forEach { syncOneBatch(it.batchId, key) }
+        var page = 1
+        var count = 0
+        do {
+            val result = authRepository.authorizedFor(key) { services, token -> requireNotNull(services.collection).batches("Bearer $token", page) }
+            if (owner() != key) throw AuthExpiredException("账号已切换")
+            result.items.forEach { remote ->
+                val local = sampleDao.batchById(remote.batch_id)
+                if (local?.ownerKey != null && local.ownerKey != key) throw UploadException("服务器返回冲突批次标识，已保留本地数据")
+                if (local == null || (local.ownerKey == key && !local.syncPending)) {
+                    val time = remote.created_at?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() } ?: local?.createdAt ?: System.currentTimeMillis()
+                    sampleDao.insertBatch(BatchEntity(remote.batch_id, remote.name, remote.place, remote.collector, remote.default_cultivar_id, remote.note, remote.closed, key, false, time))
+                }
+            }
+            count += result.items.size
+            page++
+        } while (result.items.isNotEmpty() && count < result.total)
+        return count
+    }
+    suspend fun refreshReview(sampleId: String): String {
+        val sample = ownedSample(sampleId)
+        if (sample.uploadState != "uploaded") throw UploadException("记录上传后才能获取审核反馈")
+        val review = authRepository.authorizedFor(sample.ownerKey!!) { services, token -> requireNotNull(services.collection).review("Bearer $token", sampleId) }.toString()
+        val current = ownedSample(sampleId)
+        sampleDao.update(current.copy(reviewJson = review))
+        return review
+    }
+    suspend fun submitQuestion(text: String, sampleId: String? = null, questionId: String = UuidV7.generate()): QuestionDto {
+        require(text.isNotBlank() && text.length <= 2000) { "请填写咨询内容（不超过2000字）" }
+        val key = owner()
+        sampleId?.let { if (ownedSample(it).uploadState != "uploaded") throw UploadException("只能关联本人已上传记录") }
+        val request = QuestionRequest(questionId, text.trim(), sampleId)
+        suspend fun send() = authRepository.authorizedFor(key) { services, token -> requireNotNull(services.collection).question("Bearer $token", request) }
+        return try { send() } catch (_: IOException) { send() }
+    }
+    suspend fun questions(): List<QuestionDto> {
+        val key = owner()
+        val rows = mutableListOf<QuestionDto>()
+        var page = 1
+        do {
+            val result = authRepository.authorizedFor(key) { services, token -> requireNotNull(services.collection).questions("Bearer $token", page) }
+            rows.addAll(result.items)
+            page++
+        } while (result.items.isNotEmpty() && rows.size < result.total)
+        if (owner() != key) throw AuthExpiredException("账号已切换")
+        return rows
     }
 
     private fun validateForUpload(sample: SampleEntity, images: List<ImageEntity>) {

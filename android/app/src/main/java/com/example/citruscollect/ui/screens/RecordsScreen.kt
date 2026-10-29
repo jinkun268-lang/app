@@ -69,7 +69,7 @@ private fun imgNo(sampleId: String): String = "IMG-" + sampleId.takeLast(4).uppe
 
 /**
  * 图片记录：一张图片一条记录，逐张独立编辑、识别、上传、撤回。
- * “批次”只是按采集日期做的本地分组，不写库、不上传，也不改变记录粒度。
+ * 批次同步到服务端，图片仍各自独立成条。
  */
 @Composable
 fun RecordsScreen(
@@ -83,6 +83,7 @@ fun RecordsScreen(
     val scope = rememberCoroutineScope()
 
     val pending by repository.observePending().collectAsState(initial = emptyList())
+    val legacyCount by repository.observeLegacyCount().collectAsState(initial = 0)
     val uploaded by repository.observeUploaded().collectAsState(initial = emptyList())
     val all = remember(pending, uploaded) {
         (pending + uploaded).distinctBy { it.sampleId }.sortedByDescending { it.createdAt }
@@ -169,6 +170,24 @@ fun RecordsScreen(
                             )
                         }
                     }
+                    if (legacyCount > 0) Text("旧版无主记录 $legacyCount 条已隔离保留，不自动归属当前账号", fontSize = 11.sp, color = CitrusColors.Muted)
+                    if (tab == "pending") {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("队列 ${pendingList.count { it.uploadState in setOf("queued", "uploading", "retrying") }} · 失败 ${pendingList.count { it.uploadState == "failed" }}", fontSize = 11.sp, color = CitrusColors.Muted, modifier = Modifier.weight(1f))
+                            TextButton(onClick = {
+                                scope.launch {
+                                    var queued = 0
+                                    var failed = 0
+                                    pendingList.filter { it.uploadState in setOf("pending", "failed", "retrying") }.forEach {
+                                        try { repository.enqueueUpload(it.sampleId); queued++ }
+                                        catch (e: CancellationException) { throw e }
+                                        catch (_: Exception) { failed++ }
+                                    }
+                                    message = "已入队 $queued 条" + if (failed > 0) "，$failed 条需检查信息" else "，联网后后台上传"
+                                }
+                            }) { Text("本批次全部上传", fontSize = 11.sp) }
+                        }
+                    }
                     Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp)) {
                         Text("${list.size} 张图片 · 独立管理", fontSize = 10.sp, color = CitrusColors.Faint)
                         Spacer(Modifier.weight(1f))
@@ -202,8 +221,8 @@ fun RecordsScreen(
                         busyId = sample.sampleId
                         scope.launch {
                             try {
-                                repository.upload(sample.sampleId)
-                                message = "已上传 ${imgNo(sample.sampleId)}"
+                                repository.enqueueUpload(sample.sampleId)
+                                message = "已加入后台队列 ${imgNo(sample.sampleId)}"
                                 tick++
                             } catch (e: CancellationException) {
                                 throw e
@@ -233,7 +252,8 @@ fun RecordsScreen(
                             fontSize = 11.sp, color = CitrusColors.Faint,
                             modifier = Modifier.padding(top = 6.dp)
                         )
-                        if (tab == "pending") {
+                        if (legacyCount > 0) Text("旧版无主记录 $legacyCount 条已隔离保留，不自动归属当前账号", fontSize = 11.sp, color = CitrusColors.Muted)
+                    if (tab == "pending") {
                             TextButton(onClick = onCapture) { Text("去采集", color = CitrusColors.Green) }
                         }
                     }
@@ -258,6 +278,20 @@ fun RecordsScreen(
                 Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("已选 ${selected.size} 张", fontSize = 11.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                     TextButton(onClick = { selected = emptySet() }) { Text("取消", fontSize = 11.sp) }
+                    TextButton(onClick = {
+                        val ids = selected.toList()
+                        scope.launch {
+                            var queued = 0
+                            var failed = 0
+                            ids.forEach { id ->
+                                try { repository.enqueueUpload(id); queued++ }
+                                catch (e: CancellationException) { throw e }
+                                catch (_: Exception) { failed++ }
+                            }
+                            message = "已入队 $queued 条，$failed 条未就绪"
+                            selecting = false; selected = emptySet()
+                        }
+                    }) { Text("上传", fontSize = 11.sp) }
                     TextButton(onClick = { showBulk = true }) { Text("批量填写", fontSize = 11.sp, color = CitrusColors.Green) }
                 }
             }
@@ -468,6 +502,10 @@ private fun RecordCard(
                     fontSize = 10.sp, color = Color(0xFF949C89), maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 4.dp)
                 )
+                sample.uploadError?.let { Text(it, fontSize = 10.sp, color = Color(0xFFB05F4B), maxLines = 3) }
+                if (uploaded) sample.reviewJson?.let {
+                    Text(reviewSummary(it), fontSize = 10.sp, color = CitrusColors.Green, maxLines = 2)
+                }
                 HorizontalDivider(Modifier.padding(top = 8.dp), color = Color(0xFFF0F1EB))
                 Row(Modifier.fillMaxWidth().padding(top = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                     CardAction(if (uploaded) "查看" else "编辑", CitrusColors.Green, onClick = {
@@ -479,7 +517,7 @@ private fun RecordCard(
                     if (uploaded) {
                         CardAction("撤回", Color(0xFF98A08F), onWithdraw)
                     } else {
-                        CardAction(if (busy) "上传中" else "上传 ↑", CitrusColors.Green, onUpload, enabled = !busy)
+                        CardAction(if (sample.uploadState in setOf("queued", "uploading", "retrying")) "已入队" else if (busy) "入队中" else if (sample.uploadState == "failed") "重试 ↑" else "上传 ↑", CitrusColors.Green, onUpload, enabled = !busy && sample.uploadState !in setOf("queued", "uploading", "retrying"))
                     }
                 }
             }
@@ -503,6 +541,7 @@ private fun StatusBadge(state: String) {
     when (state) {
         "uploaded" -> { label = "已上传"; background = Color(0xEEE8F3E9); foreground = Color(0xFF376748) }
         "draft" -> { label = "待完善"; background = Color(0xEEFFF4E7); foreground = Color(0xFFAD6530) }
+        "queued", "retrying" -> { label = "等待后台上传"; background = Color(0xEEEDF2E9); foreground = Color(0xFF4F6B52) }
         "uploading" -> { label = "上传中"; background = Color(0xEEEDF2E9); foreground = Color(0xFF4F6B52) }
         "needs_photos" -> { label = "需补拍"; background = Color(0xEEFFF0EB); foreground = Color(0xFFB05F4B) }
         "failed" -> { label = "上传失败"; background = Color(0xEEFFF0EB); foreground = Color(0xFFB05F4B) }

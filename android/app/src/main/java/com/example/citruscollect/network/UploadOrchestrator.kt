@@ -37,7 +37,11 @@ data class UploadRequestData(
     val classId: String,
     val symptoms: String?,
     val note: String?,
-    val images: List<UploadImage>
+    val images: List<UploadImage>,
+    val batchId: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val locationAccuracyM: Double? = null
 )
 
 data class UploadOutcome(
@@ -197,6 +201,7 @@ class UploadOrchestrator(private val upload: UploadService) {
         class_id = classId,
         symptoms = symptoms,
         note = note,
+        batch_id = batchId, latitude = latitude, longitude = longitude, location_accuracy_m = locationAccuracyM,
         images = images.map { image ->
             ImageDeclaration(
                 image_id = image.imageId,

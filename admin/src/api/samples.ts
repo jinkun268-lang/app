@@ -5,6 +5,7 @@ import type {
 } from '../types'
 
 export interface SampleListQuery {
+  batch_id?: string
   review_status?: string
   excluded?: boolean
   final_cultivar_id?: string

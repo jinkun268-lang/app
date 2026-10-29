@@ -329,7 +329,7 @@ def test_review_then_export_only_usable_image(client: TestClient):
     with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
         names = archive.namelist()
         # 只含 A 图（B 图不可用不入包）与两张 CSV，顺序稳定
-        assert names == [f"images/{sample_a}.png", "labels.csv", "classes.csv"]
+        assert names == [f"images/{sample_a}.png", "labels.csv", "collection.csv", "classes.csv"]
         assert sample_b not in " ".join(names)
         # 原图字节未重编码
         assert archive.read(f"images/{sample_a}.png") == info["png"]
@@ -385,7 +385,7 @@ def test_review_then_export_only_usable_image(client: TestClient):
     empty_zip = client.get(f"{BASE}/exports/{empty_done['export_id']}/download", headers=bearer(admin))
     assert empty_zip.status_code == 200
     with zipfile.ZipFile(io.BytesIO(empty_zip.content)) as archive:
-        assert archive.namelist() == ["labels.csv", "classes.csv"]
+        assert archive.namelist() == ["labels.csv", "collection.csv", "classes.csv"]
         assert read_csv(archive.read("labels.csv")) == [["image_id", "sample_id", "file_name", "class_id"]]
         assert read_csv(archive.read("classes.csv")) == [["class_id", "class_name"]]
 

@@ -163,6 +163,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 采集员仅本人，其他管理角色可查看批次 */
+        get: operations["listBatches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/batches/{batch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 创建或编辑本人批次，跨账号 ID 返回 404 */
+        put: operations["putBatch"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/questions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 采集员仅本人，expert/super_admin 可查看全部咨询 */
+        get: operations["listCollectionQuestions"];
+        put?: never;
+        /** 本人已上传样本可附图；同 ID 同内容幂等，异内容 409 */
+        post: operations["createCollectionQuestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/questions/{question_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 咨询详情与鉴权图片链接 */
+        get: operations["getCollectionQuestion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/questions/{question_id}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 仅 expert/super_admin 写入真实答复 */
+        patch: operations["answerCollectionQuestion"];
+        trace?: never;
+    };
     "/samples": {
         parameters: {
             query?: never;
@@ -947,7 +1033,79 @@ export interface components {
             changed: number;
             unchanged: number;
         };
+        BatchInput: {
+            name: string;
+            /** @default  */
+            place: string;
+            /** @default  */
+            collector: string;
+            default_cultivar_id?: string | null;
+            note?: string | null;
+            /** @default false */
+            closed: boolean;
+            /** Format: date-time */
+            created_at?: string | null;
+        };
+        Batch: {
+            batch_id: string;
+            owner_id: string;
+            name: string;
+            place: string;
+            collector: string;
+            default_cultivar_id: string | null;
+            note: string | null;
+            closed: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        BatchPage: {
+            items: components["schemas"]["Batch"][];
+            total: number;
+            page: number;
+            page_size: number;
+        };
+        CollectionQuestionInput: {
+            question_id: string;
+            text: string;
+            sample_id?: string | null;
+        };
+        CollectionAnswerInput: {
+            answer: string;
+        };
+        CollectionQuestion: {
+            question_id: string;
+            text: string;
+            sample_id: string | null;
+            owner_id: string;
+            /** @enum {string} */
+            status: "open" | "answered";
+            answer: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            answered_at: string | null;
+            sample: components["schemas"]["SampleDetail"] | null;
+            images: {
+                image_id: string;
+                /** @description 继承样本图片 Bearer 鉴权 */
+                preview_url: string;
+                original_url: string;
+            }[];
+        };
+        CollectionQuestionPage: {
+            items: components["schemas"]["CollectionQuestion"][];
+            total: number;
+            page: number;
+            page_size: number;
+        };
         SampleSummary: {
+            batch_id?: string | null;
+            latitude?: number | null;
+            longitude?: number | null;
+            location_accuracy_m?: number | null;
+            batch_snapshot?: components["schemas"]["Batch"] | null;
             sample_id: components["schemas"]["Id"];
             tree_id: string | null;
             original_cultivar_id: string;
@@ -1021,6 +1179,11 @@ export interface components {
             quality_events?: components["schemas"]["ImageQualityEvent"][];
         };
         SampleDetail: {
+            batch_id?: string | null;
+            latitude?: number | null;
+            longitude?: number | null;
+            location_accuracy_m?: number | null;
+            batch_snapshot?: components["schemas"]["Batch"] | null;
             sample_id: components["schemas"]["Id"];
             tree_id: string | null;
             original_cultivar_id: string;
@@ -1085,6 +1248,10 @@ export interface components {
          *     声明体 >64KiB 返回 413；1–12 图；单图 ≤20MiB；合计 ≤120MiB（JSON Schema 只能表达单图上限，清单求和与 image_id 唯一性由实现校验）。
          */
         UploadDeclareRequest: {
+            batch_id?: string | null;
+            latitude?: number | null;
+            longitude?: number | null;
+            location_accuracy_m?: number | null;
             sample_id: components["schemas"]["Id"];
             /**
              * @description 声明格式版本；当前仅接受 1
@@ -1812,9 +1979,193 @@ export interface operations {
             };
         };
     };
+    listBatches: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchPage"];
+                };
+            };
+            401: components["responses"]["AuthRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["StateConflict"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    putBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchInput"];
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Batch"];
+                };
+            };
+            401: components["responses"]["AuthRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["StateConflict"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    listCollectionQuestions: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionQuestionPage"];
+                };
+            };
+            401: components["responses"]["AuthRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["StateConflict"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    createCollectionQuestion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectionQuestionInput"];
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionQuestion"];
+                };
+            };
+            /** @description 已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionQuestion"];
+                };
+            };
+            401: components["responses"]["AuthRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["StateConflict"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    getCollectionQuestion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionQuestion"];
+                };
+            };
+            401: components["responses"]["AuthRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["StateConflict"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
+    answerCollectionQuestion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                question_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectionAnswerInput"];
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionQuestion"];
+                };
+            };
+            401: components["responses"]["AuthRequired"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["StateConflict"];
+            422: components["responses"]["ValidationFailed"];
+        };
+    };
     listSamples: {
         parameters: {
             query?: {
+                batch_id?: string;
                 /** @description 首版审核列表仅支持 complete；采集端接收中状态通过 GET /uploads/{upload_id} 查询。 */
                 upload_state?: components["parameters"]["UploadState"];
                 /** @description 多值用逗号分隔 */

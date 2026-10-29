@@ -178,6 +178,8 @@ describe('配置加载', () => {
       routes: [
         { path: '/samples', name: 'samples', component: pageStub('samples-page') },
         { path: '/reviews', component: pageStub('reviews-page') },
+        { path: '/batches', component: pageStub('batches-page') },
+        { path: '/questions', component: pageStub('questions-page') },
         { path: '/training/quality', component: pageStub('quality-page') },
         { path: '/exports', name: 'exports', component: pageStub('exports-page') },
         { path: '/settings/users', name: 'users', component: pageStub('users-page') },
@@ -197,6 +199,8 @@ describe('配置加载', () => {
 
     const menu = wrapper.findAll('.nav-item').map((n) => n.text())
     expect(menu).toContain('采集记录')
+    expect(menu).toContain('采集批次')
+    expect(menu).toContain('咨询答复')
     expect(menu).toContain('样本核验')
     expect(menu).toContain('质量检查')
     expect(menu).toContain('数据导出')

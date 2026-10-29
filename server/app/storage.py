@@ -8,7 +8,7 @@ from dataclasses import fields
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from sqlalchemy import DateTime, MetaData, Table, create_engine, delete, event, func, insert, or_, select, text, update
+from sqlalchemy import inspect, DateTime, MetaData, Table, create_engine, delete, event, func, insert, or_, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -222,7 +222,7 @@ class SqlMetadataStorage:
                 ).first()
                 if row is None:
                     conn.execute(insert(self._schema_table).values(name="schema_version", value=SCHEMA_VERSION))
-                elif str(row[0]) not in {"1", SCHEMA_VERSION}:
+                elif str(row[0]) not in {"1", "2", SCHEMA_VERSION}:
                     raise StorageError(
                         f"数据库 schema_version={row[0]} 与本版 {SCHEMA_VERSION} 不一致；请先手动迁移，不做隐式破坏性迁移"
                     )
@@ -235,10 +235,25 @@ class SqlMetadataStorage:
                         # 另一实例同时初始化；锁行已存在即视为成功。
                         pass
             self._migrate_v1()
+            self._migrate_collection_columns()
         except StorageError:
             raise
         except SQLAlchemyError as exc:
             raise StorageUnavailable("数据库初始化失败") from exc
+
+    def _migrate_collection_columns(self):
+        # Add nullable columns only: retain every historical row and its original values.
+        additions = {"samples": ("batch_id", "batch_snapshot", "latitude", "longitude", "location_accuracy_m"),
+                     "export_items": ("collection_metadata",)}
+        with self._engine.begin() as conn:
+            for name, columns in additions.items():
+                existing = {c["name"] for c in inspect(conn).get_columns(name)}
+                for column_name in columns:
+                    if column_name not in existing:
+                        column = self._tables[name].c[column_name]
+                        kind = column.type.compile(dialect=conn.dialect)
+                        conn.execute(text(f"ALTER TABLE {name} ADD COLUMN {column_name} {kind} NULL"))
+            conn.execute(update(self._schema_table).where(self._schema_table.c.name == "schema_version").values(value=SCHEMA_VERSION))
 
     def close(self) -> None:
         if not self._closed:
@@ -296,7 +311,7 @@ class SqlMetadataStorage:
             self._acquire_write_lock(session)
             version = session.execute(select(self._schema_table.c.value).where(
                 self._schema_table.c.name == "schema_version")).scalar_one()
-            if version == SCHEMA_VERSION:
+            if version != "1":
                 return
             legacy = MetaData()
             store = Store()
@@ -387,6 +402,9 @@ def _flat_rows(store):
                    "policy_version": store.policy_version})
     for key, record in store.sessions.items():
         add("sessions", {**_payload("sessions", record), "token_hash": _record_key_for_session(key)})
+    for entity in ("batches", "questions"):
+        for record in getattr(store, entity).values():
+            add(entity, record)
     for upload in store.uploads.values():
         add("uploads", upload)
     for sample in store.samples.values():
@@ -404,6 +422,24 @@ def _flat_rows(store):
 
 class _ObjectAccess:
     """Private shared adapter logic; only DataTransaction's named operations are public."""
+
+    def get_batch(self, batch_id):
+        return self._one('batches', batch_id=batch_id)
+
+    def add_batch(self, record):
+        self._add('batches', record)
+
+    def get_question(self, question_id):
+        return self._one('questions', question_id=question_id)
+
+    def add_question(self, record):
+        self._add('questions', record)
+
+    def list_batches(self, owner_id, page, page_size):
+        return self._owned_page('batches', owner_id, page, page_size)
+
+    def list_questions(self, owner_id, page, page_size):
+        return self._owned_page('questions', owner_id, page, page_size)
 
     def get_user(self, user_id):
         return self._one('users', user_id=user_id)
@@ -580,6 +616,13 @@ class _SqlTransaction(_ObjectAccess):
         self._rows[slot] = row
         self._before[slot] = None
 
+    def _owned_page(self, entity, owner_id, page, page_size):
+        table = self._tables[entity]
+        conditions = [] if owner_id is None else [table.c.owner_id == owner_id]
+        total = self._session.execute(select(func.count()).select_from(table).where(*conditions)).scalar_one()
+        statement = select(table).where(*conditions).order_by(table.c.created_at.desc(), table.c[PRIMARY_KEYS[entity][0]].desc()).offset((page - 1) * page_size).limit(page_size)
+        return RecordPage([self._track(entity, row) for row in self._select(statement)], total)
+
     def _page(self, entity, page, page_size, *, order):
         table = self._tables[entity]
         total = self._session.execute(select(func.count()).select_from(table)).scalar_one()
@@ -598,7 +641,7 @@ class _SqlTransaction(_ObjectAccess):
         conditions = [table.c.upload_state == 'complete']
         if filters.review_statuses is not None:
             conditions.append(table.c.review_status.in_(filters.review_statuses))
-        for name in ('excluded', 'final_cultivar_id', 'final_class_id', 'owner_id'):
+        for name in ('excluded', 'final_cultivar_id', 'final_class_id', 'owner_id', 'batch_id'):
             value = getattr(filters, name)
             if value is not None:
                 conditions.append(table.c[name] == value)
@@ -698,6 +741,12 @@ class _MemoryTransaction(_ObjectAccess):
         elif entity not in ('images', 'export_items'):
             value[row[PRIMARY_KEYS[entity][0]]] = row
 
+    def _owned_page(self, entity, owner_id, page, page_size):
+        rows = self._many(entity, **({'owner_id': owner_id} if owner_id else {}))
+        rows.sort(key=lambda row: (row['created_at'], row[PRIMARY_KEYS[entity][0]]), reverse=True)
+        start = (page - 1) * page_size
+        return RecordPage(rows[start:start + page_size], len(rows))
+
     def _page(self, entity, page, page_size, *, order):
         rows = sorted(self._all(entity), key=lambda row: tuple(row[key] for key in order), reverse=True)
         start = (page - 1) * page_size
@@ -714,8 +763,8 @@ class _MemoryTransaction(_ObjectAccess):
                 continue
             if filters.review_statuses is not None and sample['review_status'] not in filters.review_statuses:
                 continue
-            if any(getattr(filters, name) is not None and sample[name] != getattr(filters, name)
-                   for name in ('excluded', 'final_cultivar_id', 'final_class_id', 'owner_id')):
+            if any(getattr(filters, name) is not None and sample.get(name) != getattr(filters, name)
+                   for name in ('excluded', 'final_cultivar_id', 'final_class_id', 'owner_id', 'batch_id')):
                 continue
             value = sample['upload_completed_at']
             completed = datetime.fromisoformat(value.replace('Z', '+00:00')) if isinstance(value, str) else value

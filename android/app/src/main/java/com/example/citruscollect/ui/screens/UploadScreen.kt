@@ -117,9 +117,8 @@ fun UploadScreen(onBack: () -> Unit, onOpenDraft: (String) -> Unit,
                                         uploadingId = s.sampleId
                                         message = null
                                         try {
-                                            val outcome = container.repository.upload(s.sampleId)
-                                            message = "上传完成：${outcome.sampleId.takeLast(8)}（${outcome.imageCount} 图）"
-                                            showUploaded = true
+                                            container.repository.enqueueUpload(s.sampleId)
+                                            message = "已加入后台上传队列，离开页面也会继续"
                                         } catch (e: CancellationException) {
                                             throw e
                                         } catch (e: Exception) {

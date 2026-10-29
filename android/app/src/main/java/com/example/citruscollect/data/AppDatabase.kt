@@ -14,7 +14,7 @@ import com.example.citruscollect.data.entity.SampleEntity
 
 @Database(
     entities = [SampleEntity::class, ImageEntity::class, BatchEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -42,6 +42,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE samples ADD COLUMN ownerKey TEXT")
+                db.execSQL("ALTER TABLE batches ADD COLUMN ownerKey TEXT")
+                db.execSQL("ALTER TABLE batches ADD COLUMN syncPending INTEGER NOT NULL DEFAULT 1")
+                listOf("latitude", "longitude", "locationAccuracyM").forEach { db.execSQL("ALTER TABLE samples ADD COLUMN $it REAL") }
+                listOf("captureQualityWarning", "reviewJson").forEach { db.execSQL("ALTER TABLE samples ADD COLUMN $it TEXT") }
+            }
+        }
+
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE samples ADD COLUMN uploadId TEXT")
@@ -55,7 +65,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "citrus-collect.db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build().also { INSTANCE = it }
             }
     }
 }
