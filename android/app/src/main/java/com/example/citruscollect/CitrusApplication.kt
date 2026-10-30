@@ -27,6 +27,9 @@ class AppContainer(app: Application) {
     val backend = Backend()
     val authRepository = AuthRepository(backend, sessionStore)
     val repository = SampleRepository(db.sampleDao(), db.imageDao(), backend, authRepository)
+    val diagnosisRepository = com.example.citruscollect.data.diagnosis.DiagnosisRepository(
+        com.example.citruscollect.data.diagnosis.DiagnosisDatabase.get(app).diagnosisDao(),
+        authRepository, java.io.File(app.filesDir, "diagnoses"), db)
 
     /**
      * 当前采集批次（仅本地）：承载地点、日期、采集人和默认品种。
@@ -35,6 +38,7 @@ class AppContainer(app: Application) {
     var batchId by mutableStateOf<String?>(null)
 
     init {
+        appScope.launch { diagnosisRepository.recoverInterrupted() }
         repository.uploadResumeScheduler = { id, owner -> UploadWorker.enqueue(app, id, owner, restart = true) }
         repository.uploadScheduler = { id, owner -> UploadWorker.enqueue(app, id, owner) }
         appScope.launch {

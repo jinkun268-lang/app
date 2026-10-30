@@ -339,7 +339,7 @@ class Backend(
     }
 
     data class Services(val auth: AuthService, val upload: UploadService, val config: BootstrapService,
-        val recognition: RecognitionService, val collection: CollectionService? = null)
+        val recognition: RecognitionService, val collection: CollectionService? = null, val diagnosis: DiagnosisService? = null)
 
     private val lock = Any()
 
@@ -414,6 +414,7 @@ class Backend(
         return Services(
             auth = retrofit.create(AuthService::class.java),
             collection = retrofit.create(CollectionService::class.java),
+            diagnosis = retrofit.create(DiagnosisService::class.java),
             upload = retrofit.create(UploadService::class.java),
             recognition = retrofit.create(RecognitionService::class.java),
             // Only this read-only service may replay a failed connection. Auth and uploads keep their original policy.

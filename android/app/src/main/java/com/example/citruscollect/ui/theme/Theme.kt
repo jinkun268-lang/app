@@ -8,11 +8,11 @@ import androidx.compose.ui.graphics.Color
 /** 与设计稿一致的取色板：米白纸感背景 + 深绿主色 + 赭色提示。 */
 object CitrusColors {
     val Ink = Color(0xFF183A2B)
-    val Green = Color(0xFF245B40)
+    val Green = Color(0xFF17664F)
     val GreenSoft = Color(0xFFEDF2E9)
     val Soft = Color(0xFFEDF3ED)
     val Paper = Color(0xFFF3F1E9)
-    val Screen = Color(0xFFFCFCF8)
+    val Screen = Color(0xFFEDF3F0)
     val Line = Color(0xFFE4E9E1)
     val Muted = Color(0xFF7C877C)
     val Faint = Color(0xFF98A08F)

@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import accounts, auth, exports, review, uploads, recognition, collection
+from . import accounts, auth, exports, review, uploads, recognition, collection, diagnosis
 from .common import (
     CONTRACT_VERSION,
     DomainError,
@@ -164,6 +164,7 @@ def create_app(
     application.state.recognizer = recognizer or recognition.LocalClassifier(runtime_dir)
     application.state.detector = detector or recognition.LocalDetector(runtime_dir)
     application.state.recognition_work = UploadWork(1)
+    application.state.diagnosis_key = diagnosis.signing_key(files_root)
     if isinstance(storage, MemoryStorage):
         # 仅供隔离测试直接安排内存夹具；所有业务模块都通过storage.transaction访问。
         application.state.store = storage.store
@@ -178,6 +179,7 @@ def create_app(
     application.include_router(review.router)
     application.include_router(exports.router)
     application.include_router(recognition.router)
+    application.include_router(diagnosis.router)
 
     @application.get("/api/v1/health", tags=["health"], response_model=HealthResponse, summary="进程存活")
     def health() -> HealthResponse:
