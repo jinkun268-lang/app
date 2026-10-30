@@ -40,6 +40,142 @@ tags:
     description: 专家工单（F2 / M2）
 
 paths:
+  /diagnoses:
+    post:
+      tags:
+      - diagnosis
+      summary: Diagnose
+      operationId: diagnose_api_v1_diagnoses_post
+      parameters:
+      - name: crop_id
+        in: query
+        required: false
+        schema:
+          enum:
+          - huyou
+          - xiangyou
+          - citrus
+          type: string
+          default: huyou
+          title: Crop Id
+      - name: part
+        in: query
+        required: false
+        schema:
+          enum:
+          - leaf
+          - fruit
+          - branch
+          type: string
+          default: leaf
+          title: Part
+      - name: tree_age
+        in: query
+        required: false
+        schema:
+          enum:
+          - adult
+          - young
+          - unknown
+          type: string
+          default: unknown
+          title: Tree Age
+      - name: X-Image-ID
+        in: header
+        required: true
+        schema:
+          type: string
+          title: X-Image-Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosisOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 认证、校验、服务容量或模型不可用错误
+        '403':
+          description: 认证、校验、服务容量或模型不可用错误
+        '429':
+          description: 认证、校验、服务容量或模型不可用错误
+        '503':
+          description: 认证、校验、服务容量或模型不可用错误
+      requestBody:
+        required: true
+        content:
+          image/jpeg:
+            schema:
+              type: string
+              format: binary
+          image/png:
+            schema:
+              type: string
+              format: binary
+          image/webp:
+            schema:
+              type: string
+              format: binary
+      security:
+      - bearerAuth: []
+  /diagnoses/advice:
+    post:
+      tags:
+      - diagnosis
+      summary: Retry Advice
+      operationId: retry_advice_api_v1_diagnoses_advice_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetryIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Advice'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: 认证、校验、服务容量或模型不可用错误
+        '403':
+          description: 认证、校验、服务容量或模型不可用错误
+        '429':
+          description: 认证、校验、服务容量或模型不可用错误
+        '503':
+          description: 认证、校验、服务容量或模型不可用错误
+      security:
+      - bearerAuth: []
   /recognitions:
     post:
       tags: [recognition]
@@ -1451,6 +1587,176 @@ components:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
 
   schemas:
+    Action:
+      properties:
+        title:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Title
+        detail:
+          type: string
+          maxLength: 3000
+          minLength: 1
+          title: Detail
+      type: object
+      required:
+      - title
+      - detail
+      title: Action
+    Advice:
+      properties:
+        status:
+          type: string
+          enum:
+          - matched
+          - uncertain
+          - healthy
+          - unmapped
+          - conflict
+          - unavailable
+          title: Status
+        title:
+          type: string
+          title: Title
+        message:
+          type: string
+          title: Message
+        actions:
+          items:
+            $ref: '#/components/schemas/Action'
+          type: array
+          title: Actions
+        sources:
+          items:
+            $ref: '#/components/schemas/Source'
+          type: array
+          title: Sources
+        version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Version
+      type: object
+      required:
+      - status
+      - title
+      - message
+      title: Advice
+    Candidate:
+      properties:
+        label:
+          type: string
+          maxLength: 100
+          minLength: 1
+          title: Label
+        name:
+          type: string
+          maxLength: 100
+          minLength: 1
+          title: Name
+        score:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Score
+        class_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Class Id
+      type: object
+      required:
+      - label
+      - name
+      - score
+      title: Candidate
+    DiagnosisOut:
+      properties:
+        recognition:
+          $ref: '#/components/schemas/RecognitionOut'
+        advice:
+          $ref: '#/components/schemas/Advice'
+        receipt:
+          type: string
+          title: Receipt
+      type: object
+      required:
+      - recognition
+      - advice
+      - receipt
+      title: DiagnosisOut
+    RecognitionOut:
+      properties:
+        image_id:
+          type: string
+          title: Image Id
+        sha256:
+          type: string
+          title: Sha256
+        model:
+          type: string
+          title: Model
+        model_version:
+          type: string
+          title: Model Version
+        scope:
+          type: string
+          title: Scope
+        candidates:
+          items:
+            $ref: '#/components/schemas/Candidate'
+          type: array
+          maxItems: 5
+          minItems: 1
+          title: Candidates
+        warning:
+          type: string
+          title: Warning
+        created_at:
+          type: string
+          title: Created At
+      type: object
+      required:
+      - image_id
+      - sha256
+      - model
+      - model_version
+      - scope
+      - candidates
+      - warning
+      - created_at
+      title: RecognitionOut
+    RetryIn:
+      properties:
+        receipt:
+          type: string
+          maxLength: 24000
+          minLength: 1
+          title: Receipt
+      additionalProperties: false
+      type: object
+      required:
+      - receipt
+      title: RetryIn
+    Source:
+      properties:
+        title:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Title
+        url:
+          type: string
+          maxLength: 2083
+          minLength: 1
+          format: uri
+          title: Url
+      type: object
+      required:
+      - title
+      - url
+      title: Source
     # ---------- 通用 ----------
     ErrorResponse:
       type: object
