@@ -20,6 +20,8 @@ jobs:
           cache: pip
           cache-dependency-path: server/requirements.txt
       - run: pip install -r server/requirements.txt
+      # 短信登录用例依赖阿里云 SDK；缺少时该用例会 ModuleNotFoundError。
+      - run: pip install -r server/requirements-sms.txt
       - name: pytest（内存库，跳过 MySQL 用例）
         run: APP_DATABASE_URL=memory python -m pytest server/tests -q -k 'not mysql'
       - name: 契约检查
@@ -32,7 +34,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # vitest 5 的 threads worker 在 Node 20 上启动失败，需 22+。
+          node-version: '22'
           cache: npm
           cache-dependency-path: admin/package-lock.json
       - run: npm --prefix admin ci
