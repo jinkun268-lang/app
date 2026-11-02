@@ -1,6 +1,7 @@
 """Authenticated, bounded single-image inference. Images are temporary, never training labels."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -8,6 +9,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import tempfile
 from typing import Any
@@ -121,6 +123,84 @@ class LocalDetector:
         except (OSError, subprocess.TimeoutExpired, ValueError):
             logger.warning("detector unavailable, fallback to classifier", exc_info=True)
             return None, None
+
+
+class _SocketUnavailable(RuntimeError):
+    """常驻推理服务不可达：退回子进程实现，不阻断主链路。"""
+
+
+class InferenceSocket:
+    """常驻推理服务客户端：一条请求一条 JSON 行，图片用 base64。"""
+
+    def __init__(self, path: str, timeout: float = 120.0):
+        self.path = path
+        self.timeout = timeout
+
+    def call(self, op: str, image: bytes = b"") -> dict:
+        payload = {"op": op}
+        if image:
+            payload["image"] = base64.b64encode(image).decode("ascii")
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+                conn.settimeout(self.timeout)
+                conn.connect(self.path)
+                conn.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+                with conn.makefile("rb") as reader:
+                    line = reader.readline()
+        except (OSError, ValueError, socket.timeout) as exc:
+            raise _SocketUnavailable(str(exc)) from exc
+        if not line:
+            raise _SocketUnavailable("推理服务返回空响应")
+        try:
+            doc = json.loads(line)
+        except ValueError as exc:
+            raise _SocketUnavailable("推理服务响应无法解析") from exc
+        if not doc.get("ok"):
+            logger.warning("inference daemon error: %s", doc.get("error"))
+            raise DomainError(503, "MODEL_UNAVAILABLE", "识别服务暂时不可用，照片已保留，可稍后重试")
+        return doc
+
+
+class SocketClassifier:
+    """优先走常驻服务；服务不可用时退回每次起进程的实现。"""
+
+    def __init__(self, client: InferenceSocket, fallback: "LocalClassifier"):
+        self.client = client
+        self.fallback = fallback
+
+    def predict(self, image: bytes) -> dict[str, Any]:
+        try:
+            return self.client.call("classify", image)["classification"]
+        except _SocketUnavailable:
+            logger.warning("推理服务不可用，退回子进程分类")
+            return self.fallback.predict(image)
+
+
+class SocketDetector:
+    def __init__(self, client: InferenceSocket, fallback: "LocalDetector"):
+        self.client = client
+        self.fallback = fallback
+
+    def detect(self, image: bytes) -> tuple[dict[str, Any] | None, bytes | None]:
+        try:
+            doc = self.client.call("detect", image)
+        except _SocketUnavailable:
+            logger.warning("推理服务不可用，退回子进程检测")
+            return self.fallback.detect(image)
+        detection = doc.get("detection")
+        crop = doc.get("crop") or ""
+        return detection, (base64.b64decode(crop) if crop else None)
+
+
+def build_pipeline(runtime_dir: Path) -> tuple[Any, Any]:
+    """按 APP_INFERENCE_SOCKET 选择常驻服务；未配置时保持原有的子进程实现。"""
+    classifier = LocalClassifier(runtime_dir)
+    detector = LocalDetector(runtime_dir)
+    socket_path = (os.environ.get("APP_INFERENCE_SOCKET") or "").strip()
+    if not socket_path:
+        return classifier, detector
+    client = InferenceSocket(socket_path)
+    return SocketClassifier(client, classifier), SocketDetector(client, detector)
 
 
 def _prepare(data: bytes) -> bytes:

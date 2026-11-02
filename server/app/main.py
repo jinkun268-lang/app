@@ -162,9 +162,13 @@ def create_app(
     application.state.limits = limits
     application.state.upload_work = upload_work
     application.state.export_work = export_work
-    application.state.recognizer = recognizer or recognition.LocalClassifier(runtime_dir)
-    application.state.detector = detector or recognition.LocalDetector(runtime_dir)
-    application.state.recognition_work = UploadWork(1)
+    if recognizer is None and detector is None:
+        # 配置了 APP_INFERENCE_SOCKET 时走常驻推理服务，否则保持子进程实现。
+        application.state.recognizer, application.state.detector = recognition.build_pipeline(runtime_dir)
+    else:
+        application.state.recognizer = recognizer or recognition.LocalClassifier(runtime_dir)
+        application.state.detector = detector or recognition.LocalDetector(runtime_dir)
+    application.state.recognition_work = UploadWork(limits.recognition_concurrency)
     application.state.diagnosis_key = diagnosis.signing_key(files_root)
     application.state.sms_provider = sms_provider or phone_auth.AliyunSmsProvider()
     if isinstance(storage, MemoryStorage):

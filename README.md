@@ -42,7 +42,7 @@ PostgreSQL部署使用受支持版本（已兼容17），参考`deploy/.env.post
 - collector：声明、逐图上传、缺图补传，以及本人采集记录只读。
 - expert：专业核验；admin：训练图片质量、排除／恢复、导出；super_admin：跨区及账号管理。
 - 元数据通过`MetadataStorage/DataTransaction`访问，图片和ZIP通过`FileStorage`访问；数据库中不保存图片字节。
-- 默认单API进程：上传最多4个在途请求；导出同时1批、每账号每分钟6批、最多5000图／候选样本、ZIP不超过1GiB。满额429、超范围413；异常重启后可按原快照重试导出。
+- 默认单API进程：上传最多4个在途请求、识别最多3个；导出同时1批、每账号每分钟6批、最多5000图／候选样本、ZIP不超过1GiB。满额429、超范围413；异常重启后可按原快照重试导出。
 - 生产使用Nginx等HTTPS入口，API／数据库保持私网或回环；网关生成器入口为`python deploy/nginx/render.py --help`。
 
 Android用Android Studio打开`android/`，配置本机SDK后构建；模拟器访问宿主机API通常使用`http://10.0.2.2:8000/api/v1/`。实体设备需使用可达的HTTPS服务地址。
@@ -66,7 +66,9 @@ Android 照片缩略图下的“识别此图”连接 `POST /api/v1/recognitions
 
 未配置模型时接口返回503，不使用模拟结果。配置 `APP_RECOGNITION_PYTHON` 为已安装 PyTorch/torchvision 的独立 Python，`APP_RECOGNITION_MANIFEST` 为模型清单的绝对路径；主 API 环境不需要安装 PyTorch。清单示例见 [deploy/recognition.example.json](deploy/recognition.example.json)，`weights` 替换为本机训练权重路径，类别顺序必须与训练时一致。当前 worker 支持 torchvision EfficientNet-B0 的 state_dict，用 `weights_only=True` 加载、不下载预训练权重，使用2个CPU线程。
 
-当前接入的是实验性叶片五分类模型，仅供人工复核，不用于果实或虫体。分数不是诊断确定性；无法映射到现有启用字典的类别，采用时使用“不确定”，原始模型建议仍保留。接口只接受采集账号，单图最多20MiB、2400万像素，单并发、推理超时45秒；临时图片在推理结束后清除，不自动加入训练集。
+当前接入的是实验性叶片五分类模型，仅供人工复核，不用于果实或虫体。分数不是诊断确定性；无法映射到现有启用字典的类别，采用时使用“不确定”，原始模型建议仍保留。接口只接受采集账号，单图最多20MiB、2400万像素，默认3个识别在途（超出返回429，可用`APP_RECOGNITION_CONCURRENCY` 调整）、推理超时45秒；临时图片在推理结束后清除，不自动加入训练集。
+
+单张识别的模型可以在主进程外常驻：`server/tools/inference_server.py` 启动时加载一次检测与分类模型，通过 Unix socket 提供推理，API 侧通过 `APP_INFERENCE_SOCKET` 连接，把每次请求的进程启动与 torch 导入成本去掉（实测单张约 7.3 秒降到 0.6 秒）。systemd 单元见 [deploy/systemd/citrus-inference.service](deploy/systemd/citrus-inference.service)。未配置该变量、或常驻服务不可达时，API 自动退回上面的子进程实现，功能不变只是更慢。
 
 识别前会先跑一次本地 YOLO 检测（SciDB 15 类，`mAP50 0.964`）判断画面里有没有叶片：没有检出叶片类目标时直接返回 `422 NO_LEAF`，不再让闭集分类器强行给类别；检出叶片时按最大叶片框裁剪，再交给五分类模型。检测器不可用时自动退化为纯分类，不阻断主链路。检测器权重与 Python 环境在 `server/config/detector.json` 中填写，并用 `APP_RECOGNITION_DETECT_MANIFEST` 显式启用；默认不部署、不下载模型。分类模型仍由 `APP_RECOGNITION_MANIFEST` / `APP_RECOGNITION_PYTHON` 配置。模型在其他电脑时，本机可先完成手动采集、上传和专家反馈。
 

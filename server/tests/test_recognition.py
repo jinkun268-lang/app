@@ -70,16 +70,26 @@ def test_unconfigured_or_invalid_classifier_never_returns_fake_predictions(monke
         assert response.status_code == 503
 
 
-def test_recognition_admits_only_one_model_process():
+def _blocking_classifier(entered, release):
     classifier = Classifier()
-    entered, release = threading.Event(), threading.Event()
     original = classifier.predict
+
     def slow(data):
         entered.set()
         assert release.wait(5)
         return original(data)
+
     classifier.predict = slow
-    with TestClient(create_app("memory", recognizer=classifier)) as client, ThreadPoolExecutor(max_workers=1) as pool:
+    return classifier
+
+
+def test_recognition_rejects_beyond_configured_concurrency():
+    from server.app.resources import ServiceLimits
+
+    entered, release = threading.Event(), threading.Event()
+    classifier = _blocking_classifier(entered, release)
+    limits = ServiceLimits(recognition_concurrency=1)
+    with TestClient(create_app("memory", recognizer=classifier, limits=limits)) as client, ThreadPoolExecutor(max_workers=1) as pool:
         headers = {**token(client), "Content-Type": "image/png", "X-Image-ID": new_uuid7()}
         future = pool.submit(client.post, "/api/v1/recognitions", headers=headers, content=png())
         try:
@@ -88,6 +98,20 @@ def test_recognition_admits_only_one_model_process():
         finally:
             release.set()
         assert future.result().status_code == 200
+
+
+def test_recognition_queues_small_burst_under_default_concurrency():
+    """默认允许多个识别在途：并发拍摄排队而不是直接 429。"""
+    entered, release = threading.Event(), threading.Event()
+    classifier = _blocking_classifier(entered, release)
+    with TestClient(create_app("memory", recognizer=classifier)) as client, ThreadPoolExecutor(max_workers=3) as pool:
+        headers = {**token(client), "Content-Type": "image/png", "X-Image-ID": new_uuid7()}
+        futures = [pool.submit(client.post, "/api/v1/recognitions", headers=headers, content=png()) for _ in range(3)]
+        try:
+            assert entered.wait(3)
+        finally:
+            release.set()
+        assert [future.result().status_code for future in futures] == [200, 200, 200]
 
 
 def test_configured_classifier_uses_existing_worker_and_cleans_temporary_image(tmp_path, monkeypatch):

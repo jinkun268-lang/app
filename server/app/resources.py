@@ -18,6 +18,8 @@ from .common import DomainError
 @dataclass(frozen=True)
 class ServiceLimits:
     upload_concurrency: int = 4
+    # 识别常驻推理串行执行；这里允许少量请求排队，避免并发拍摄时直接 429。
+    recognition_concurrency: int = 3
     export_concurrency: int = 1
     export_requests_per_minute: int = 6
     export_max_images: int = 5000
@@ -29,6 +31,8 @@ class ServiceLimits:
                 raise ValueError(f'{name} must be a positive integer')
         if self.upload_concurrency > 16 or self.export_concurrency > 4:
             raise ValueError('Work concurrency exceeds the supported single-process limit')
+        if self.recognition_concurrency > 8:
+            raise ValueError('recognition_concurrency exceeds the supported single-process limit')
 
     @classmethod
     def from_env(cls):
