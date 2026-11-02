@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import accounts, auth, exports, review, uploads, recognition, collection, diagnosis, phone_auth
+from . import accounts, auth, exports, review, uploads, recognition, collection, diagnosis, phone_auth, training
 from .common import (
     CONTRACT_VERSION,
     DomainError,
@@ -183,6 +183,7 @@ def create_app(
     application.include_router(accounts.router)
     application.include_router(uploads.router)
     application.include_router(collection.router)
+    application.include_router(training.router)
     application.include_router(review.router)
     application.include_router(exports.router)
     application.include_router(recognition.router)
