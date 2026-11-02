@@ -1,0 +1,28 @@
+[Unit]
+Description=Citrus inference daemon (YOLO leaf gate + EfficientNet classifier)
+After=network.target
+
+[Service]
+Type=simple
+User=citrus
+Group=citrus
+WorkingDirectory=/opt/citrus-app/current
+EnvironmentFile=/etc/citrus-app/app.env
+Environment=PYTHONUNBUFFERED=1
+RuntimeDirectory=citrus-inference
+RuntimeDirectoryMode=0755
+ExecStart=/opt/citrus-app/model-venv/bin/python /opt/citrus-app/current/server/tools/inference_server.py \
+    --socket /run/citrus-inference/inference.sock \
+    --classifier-manifest /etc/citrus-app/classifier.json \
+    --detector-manifest /etc/citrus-app/detector.json
+Restart=always
+RestartSec=3
+# 模型加载后常驻；进程被杀由 Restart 拉起，API 侧会自动退回子进程实现。
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/citrus-inference /var/lib/citrus-app
+
+[Install]
+WantedBy=multi-user.target

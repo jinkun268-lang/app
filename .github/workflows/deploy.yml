@@ -1,0 +1,58 @@
+name: deploy
+
+# 调试阶段：main 有提交即发布到香港服务器。
+# 发布脚本自带健康检查与自动回滚，失败会切回上一个版本。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 发布到生产服务器
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+
+      - name: 构建管理端
+        run: |
+          npm --prefix admin ci
+          npm --prefix admin run build
+
+      - name: 打包发布物（源码 + 已构建的前端）
+        run: |
+          TAG="$(git rev-parse --short=12 HEAD)"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          tar -czf "/tmp/release-$TAG.tar.gz" \
+            --exclude=.git \
+            --exclude=node_modules \
+            --exclude='*/node_modules' \
+            --exclude=.runtime \
+            --exclude='*.keystore' \
+            --exclude='*.jks' \
+            -C "$GITHUB_WORKSPACE" .
+          ls -lh "/tmp/release-$TAG.tar.gz"
+
+      - name: 上传并执行发布
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ vars.SSH_PORT || '22' }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          scp -P "$SSH_PORT" -i ~/.ssh/id_ed25519 "/tmp/release-$TAG.tar.gz" "$SSH_USER@$SSH_HOST:/tmp/"
+          ssh -p "$SSH_PORT" -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
+            "sudo /opt/citrus-app/publish.sh /tmp/release-$TAG.tar.gz $TAG && rm -f /tmp/release-$TAG.tar.gz"
