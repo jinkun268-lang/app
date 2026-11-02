@@ -81,7 +81,7 @@ private fun labels(): Pair<String, String> {
     return (if (morning) "上午采集" else "下午采集") to day
 }
 
-/** 采集首页：批次条 + 连续拍摄入口 + 最近记录。 */
+/** 采集首页：批次条 + 连续拍摄入口 + 当前批次最近记录。 */
 @Composable
 fun CaptureHomeScreen(
     onStartCapture: () -> Unit,
@@ -91,12 +91,16 @@ fun CaptureHomeScreen(
     val container = LocalAppContainer.current
     val pending by container.repository.observePending().collectAsState(initial = emptyList())
     val uploaded by container.repository.observeUploaded().collectAsState(initial = emptyList())
-    val all = remember(pending, uploaded) {
-        (pending + uploaded).distinctBy { it.sampleId }.sortedByDescending { it.createdAt }
+    val currentBatchId = container.batchId
+    val batchSamples = remember(pending, uploaded, currentBatchId) {
+        (pending + uploaded)
+            .filter { currentBatchId != null && it.batchId == currentBatchId }
+            .distinctBy { it.sampleId }
+            .sortedByDescending { it.createdAt }
     }
     val batches by container.repository.observeBatches().collectAsState(initial = emptyList())
-    val batch = batches.firstOrNull { it.batchId == container.batchId }
-    val batchCount = all.count { it.batchId == container.batchId }
+    val batch = batches.firstOrNull { it.batchId == currentBatchId }
+    val batchCount = batchSamples.size
 
     Column(Modifier.fillMaxSize().background(CitrusColors.Screen).verticalScroll(rememberScrollState())) {
         Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 12.dp)) {
@@ -129,10 +133,10 @@ fun CaptureHomeScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (all.isEmpty()) {
+            if (batchSamples.isEmpty()) {
                 item { Text("还没有照片，拍下第一张就会生成记录", fontSize = 11.sp, color = CitrusColors.Faint) }
             }
-            items(all.take(6), key = { it.sampleId }) { sample ->
+            items(batchSamples.take(6), key = { it.sampleId }) { sample ->
                 val images by container.repository.imagesOf(sample.sampleId).collectAsState(initial = emptyList())
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     images.firstOrNull()?.let { LocalPhoto(it, Modifier.size(54.dp).clip(RoundedCornerShape(6.dp))) }
