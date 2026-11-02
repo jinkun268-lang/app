@@ -13,7 +13,7 @@ Android 提供独立病虫害识别与数据采集两条流程；Web 用于专�
 
 ## 本地启动
 
-需要 Python 3.10+、Node.js 20+；Android构建需要JDK17和Android SDK35。
+需要 Python 3.10+、Node.js 22+；Android构建需要JDK17和Android SDK35。
 
 在项目根目录执行（PowerShell）：
 
