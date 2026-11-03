@@ -73,6 +73,8 @@ server {{
     location ~ (^|/)\\. {{ deny all; }}
     {routes}
     location /assets/ {{ try_files $uri =404; }}
+    # 安卓安装包下载目录（CI 通过 deploy 用户上传，独立于 releases）。
+    location /downloads/ {{ alias /opt/citrus-app/downloads/; try_files $uri =404; }}
     location = /index.html {{ try_files /index.html =404; }}
     location / {{ try_files /index.html =404; }}
     {errors}
@@ -204,6 +206,7 @@ http {
         ~^/api/v1/media/ "private, max-age=86400";
         ~^/api(?:/|$) no-store;
         ~^/assets/ "public, max-age=31536000, immutable";
+        ~^/downloads/ "public, max-age=300";
     }
     map $status $response_cache {
         default no-store;

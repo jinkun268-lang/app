@@ -7,6 +7,11 @@ plugins {
 }
 
 val localDebugEnabled = providers.gradleProperty("citrusLocalDebug").orNull == "true"
+// CI 通过 -P 注入版本号，保证版本单调递增；本地构建保留原默认值。
+val appVersionCode = providers.gradleProperty("appVersionCode").orNull?.toIntOrNull() ?: 4
+val appVersionName = providers.gradleProperty("appVersionName").orNull ?: "0.1.3"
+// CI 通过环境变量提供签名证书；未提供时回退到 debug 签名（与历史安装包同一签名身份）。
+val ciKeystorePath = System.getenv("CITRUS_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
 
 android {
     namespace = "com.example.citruscollect"
@@ -17,11 +22,22 @@ android {
         applicationId = "com.example.citruscollect"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = appVersionCode
+        versionName = appVersionName
         buildConfigField("String", "API_BASE_URL", "\"https://api.homemanager.com.cn/api/v1/\"")
         buildConfigField("boolean", "LOCAL_DEBUG", "false")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        if (ciKeystorePath != null) {
+            create("ci") {
+                storeFile = file(ciKeystorePath)
+                storePassword = System.getenv("CITRUS_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("CITRUS_KEY_ALIAS")
+                keyPassword = System.getenv("CITRUS_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -37,6 +53,7 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.findByName("ci") ?: signingConfigs.getByName("debug")
         }
     }
 
