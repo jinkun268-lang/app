@@ -54,9 +54,8 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
           scp -P "$SSH_PORT" -i ~/.ssh/id_ed25519 "/tmp/release-$TAG.tar.gz" "$SSH_USER@$SSH_HOST:/tmp/"
-          # 发布脚本随仓库版本走，先同步再执行，避免服务器上的副本与代码脱节。
-          scp -P "$SSH_PORT" -i ~/.ssh/id_ed25519 deploy/publish.sh "$SSH_USER@$SSH_HOST:/tmp/publish.sh"
+          # 发布脚本随仓库版本走：放到约定位置，由 publish.sh 自身（root）安装，不额外申请 sudo 权限。
+          scp -P "$SSH_PORT" -i ~/.ssh/id_ed25519 deploy/publish.sh "$SSH_USER@$SSH_HOST:/tmp/publish.sh.new"
           ssh -p "$SSH_PORT" -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "sudo install -m 755 -o root -g root /tmp/publish.sh /opt/citrus-app/publish.sh \
-             && sudo /opt/citrus-app/publish.sh /tmp/release-$TAG.tar.gz $TAG \
-             && rm -f /tmp/release-$TAG.tar.gz /tmp/publish.sh"
+            "sudo /opt/citrus-app/publish.sh /tmp/release-$TAG.tar.gz $TAG \
+             && rm -f /tmp/release-$TAG.tar.gz /tmp/publish.sh.new"
