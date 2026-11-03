@@ -63,11 +63,21 @@ jobs:
           echo "versionCode=$CODE  versionName=$NAME"
 
       - name: 单元测试（结果单独可见，不阻断出包）
+        id: unit_test
         continue-on-error: true
         run: |
           cd android
           ./gradlew --no-daemon :app:testDebugUnitTest \
             -PappVersionCode="$APP_CODE" -PappVersionName="$APP_NAME"
+
+      - name: 打印失败的测试断言
+        if: steps.unit_test.outcome == 'failure'
+        run: |
+          DIR=android/app/build/test-results/testDebugUnitTest
+          echo "=== 汇总 ==="
+          grep -h -o 'tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*"' "$DIR"/*.xml || true
+          echo "=== 失败详情 ==="
+          grep -h -A4 '<failure' "$DIR"/*.xml | head -60 || true
 
       - name: 打包 release APK
         env:
