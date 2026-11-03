@@ -22,6 +22,26 @@ Android 提供独立病虫害识别与数据采集两条流程；Web 用于专�
 
 离线演示仅保留最终的 [训练数据页面Demo.html](demo/训练数据页面Demo.html)，可直接用浏览器打开，无需启动服务。正式页面使用真实 API；演示使用独立 fixture，不作为正式数据源。
 
+## 识别记录保存与修正
+
+管理端沿用已确认的“专家咨询 → 离线识别”（`/offline-recognitions`）页面，限专家及超级管理员。保留疾病多选、上传日期范围、原始／已修正筛选、按需修正和默认折叠的历史记录。
+
+识别由服务器负责，手机无需加载模型。新流程为：
+
+1. Android通过`PUT /api/v1/diagnoses/{record_id}`提交图片SHA、大小及现场信息，稳定UUIDv7对应同一张图片，不发送识别结果。
+2. Android按现有`POST /api/v1/diagnoses`发送原图。服务器完整接收、校验后，先提交默认结果为“系统识别错误”的数据库记录，再发布原图并标记为“识别中”，之后才调用现有检测／分类模型。数据库记录先于最终图片文件提交，避免无记录的孤立图片。
+3. 模型成功后，服务器直接更新同一记录的原始结果和当前类别，通过原HTTP请求返回手机，并发送管理端实时更新事件。失败时保留原图、默认结果与失败原因，不伪造候选或分数；手机可通过`GET /api/v1/diagnoses/{record_id}`读取服务器结果，不需要把识别结果再回传入库。
+
+同ID成功请求复用原始结果，不重复推理；同ID不同图片／条件冲突返回409，正在识别时阻止重复运行。文件保存失败时不调用模型；服务重启会将中断任务保留为可重试的失败记录。重试失败识别时保留已有人工修正，模型成功只补原始系统结果。原来的`X-Archive-Original`不再控制是否保存：独立拍照识别始终先保存图片和记录；旧客户端不先提交现场信息也能保存基础记录，但详细现象等应由新客户端在上传前提交。
+
+原图沿用`APP_STORAGE_ROOT/files/originals/<record_id>.<ext>`，字节及SHA保持；预览按需生成`previews/<record_id>/1024.jpg`，移除EXIF并校正方向。原图上限20MiB／2400万像素，JPEG／PNG／WebP静态图像；无效输入在发布前拒绝。schema7只在识别记录表新增可空的推理状态、失败代码、失败原因和更新时间，旧数据、原图、修正历史及目录／索引结构保持；增量DDL见`server/migrations/007_recognition_save_first.*.sql`。
+
+管理端通过鉴权SSE `/api/v1/offline-recognitions/events`接收记录变化并重新读取真实数据，上传后的默认记录、成功或失败结果均自动更新，不依赖手机返回结果或人工刷新页面。断线重连后读取快照补齐变化；沿用本项目单API进程部署。该连接仅更新当前页面，不是消息提醒系统。
+
+人工修正仍使用`expected_version`保护并发，记录前后结果、操作人、时间及说明；识别中禁止修改，失败后可修正。图片和默认结果不会自动成为采集样本或训练标签。消息提醒按约定继续预留。只保留服务端负责结果保存的正式流程，移除试验版本的客户端结果回传／补传接口。Room数据不清除，拍照前的本机原图继续保留。
+
+发布时先更新服务端及数据库结构，再发布配套Android客户端；新客户端需要`PUT/GET /diagnoses/{record_id}`接口。模型服务及其权重沿用既有配置，不需要因保存识别记录重新下载权重。
+
 ## 本地启动
 
 需要 Python 3.10+、Node.js 22+；Android构建需要JDK17和Android SDK35。
@@ -62,6 +82,7 @@ Android用Android Studio打开`android/`，配置本机SDK后构建；模拟器�
 
 ```powershell
 $env:APP_DATABASE_URL='memory'
+./server/.venv/Scripts/python.exe -m pip install -r server/requirements-sms.txt
 ./server/.venv/Scripts/python.exe -m pytest server/tests -q -k 'not mysql'
 npm --prefix admin run typecheck
 npm --prefix admin test

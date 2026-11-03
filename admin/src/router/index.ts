@@ -24,6 +24,7 @@ const routes = [
       { path: 'exports', name: 'exports', component: () => import('../views/ExportsView.vue'), meta: { title: '数据导出', roles: TRAINING_ROLES } },
       { path: 'batches', name: 'batches', component: () => import('../views/BatchesView.vue'), meta: { title: '采集批次', roles: COLLECTION_ROLES } },
       { path: 'questions', name: 'questions', component: () => import('../views/QuestionsView.vue'), meta: { title: '专家咨询', roles: REVIEW_ROLES } },
+      { path: 'offline-recognitions', name: 'offline-recognitions', component: () => import('../views/OfflineRecognitionsView.vue'), meta: { title: '离线识别', roles: REVIEW_ROLES } },
       { path: 'tickets', name: 'tickets', component: () => import('../views/KnowledgeReviewView.vue'), meta: { title: '专家工单', roles: ['expert', 'super_admin'] as Role[] } },
       { path: 'settings/dictionaries', name: 'dictionaries', component: () => import('../views/DictionariesView.vue'), meta: { title: '基础字典', roles: ['super_admin'] as Role[] } },
       { path: 'settings/users', name: 'users', component: () => import('../views/UsersView.vue'), meta: { title: '账号管理', roles: ['super_admin'] as Role[] } },

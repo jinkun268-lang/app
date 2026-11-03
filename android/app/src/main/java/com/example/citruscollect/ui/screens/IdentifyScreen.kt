@@ -98,7 +98,7 @@ fun IdentifyScreen(photoPath: String?, onPhotoConsumed: () -> Unit, onCamera: ()
             OutlinedTextField(value = symptom, onValueChange = { symptom = it.take(300) }, label = { Text("还有哪些现象（选填）") }, modifier = Modifier.fillMaxWidth(), enabled = !busy)
             Row {
                 Checkbox(checked = consent, onCheckedChange = { consent = it }, enabled = !busy)
-                Text("同意发送这张图片进行本次识别。不会自动加入采集数据集。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
+                Text("同意上传图片、现场信息和识别结果，供管理人员查看并在必要时修正。不会自动加入采集数据集。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
             }
             error?.let { Text(it, color = CitrusColors.Red) }
             Button(enabled = !busy && imagePath != null && consent, modifier = Modifier.fillMaxWidth(), onClick = {

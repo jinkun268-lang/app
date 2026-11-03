@@ -5,10 +5,11 @@ from sqlalchemy import (JSON, BigInteger, Boolean, Column, DateTime, Float, Fore
                         Integer, MetaData, String, Table, Text, UniqueConstraint)
 from sqlalchemy.dialects.mysql import DATETIME, VARCHAR
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "7"
 ENTITY_ORDER = ("users", "cultivars", "classes", "config", "batches", "uploads", "samples", "images",
-                "sessions", "exports", "export_items", "idempotency", "questions", "phone_identities", "sms_states")
+                "sessions", "exports", "export_items", "idempotency", "questions", "phone_identities", "sms_states", "offline_recognitions")
 PRIMARY_KEYS = {
+    "offline_recognitions": ("record_id",),
     "phone_identities": ("phone_key",), "sms_states": ("record_key",),
     "batches": ("batch_id",), "questions": ("question_id",),
     "users": ("user_id",), "sessions": ("token_hash",), "cultivars": ("cultivar_id",),
@@ -41,6 +42,14 @@ def build_schema():
     table("phone_identities", col("phone_key", String(64), primary_key=True),
           ref("user_id", "users.user_id", unique=True), col("masked_phone", String(16), nullable=True))
     table("sms_states", col("record_key", String(64), primary_key=True), col("data", JSON))
+    table("offline_recognitions", col("record_id", String(36), primary_key=True),
+          ref("owner_id", "users.user_id"), col("declaration", JSON), col("declaration_hash", String(64)),
+          col("state", String(16)), col("file_key", String(512)), col("created_at", timestamp),
+          col("uploaded_at", timestamp, nullable=True), col("current_name", String(100)),
+          col("current_class_id", String(128), nullable=True), col("correction_version", Integer),
+          col("correction_events", JSON), col("inference_status", String(20), nullable=True),
+          col("inference_error_code", String(64), nullable=True), col("inference_error", Text, nullable=True),
+          col("updated_at", timestamp, nullable=True))
     table("cultivars", col("cultivar_id", String(64), primary_key=True), col("name", String(128)),
           col("is_active", Boolean), col("version", Integer))
     table("classes", col("class_id", String(128), primary_key=True), col("name", String(128)),

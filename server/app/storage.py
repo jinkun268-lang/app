@@ -222,7 +222,7 @@ class SqlMetadataStorage:
                 ).first()
                 if row is None:
                     conn.execute(insert(self._schema_table).values(name="schema_version", value=SCHEMA_VERSION))
-                elif str(row[0]) not in {"1", "2", "3", "4", SCHEMA_VERSION}:
+                elif str(row[0]) not in {"1", "2", "3", "4", "5", "6", SCHEMA_VERSION}:
                     raise StorageError(
                         f"数据库 schema_version={row[0]} 与本版 {SCHEMA_VERSION} 不一致；请先手动迁移，不做隐式破坏性迁移"
                     )
@@ -244,7 +244,8 @@ class SqlMetadataStorage:
     def _migrate_collection_columns(self):
         # Add nullable columns only: retain every historical row and its original values.
         additions = {"samples": ("batch_id", "batch_snapshot", "latitude", "longitude", "location_accuracy_m"),
-                     "export_items": ("collection_metadata",), "phone_identities": ("masked_phone",)}
+                     "export_items": ("collection_metadata",), "phone_identities": ("masked_phone",),
+                     "offline_recognitions": ("inference_status", "inference_error_code", "inference_error", "updated_at")}
         with self._engine.begin() as conn:
             for name, columns in additions.items():
                 existing = {c["name"] for c in inspect(conn).get_columns(name)}
@@ -402,7 +403,7 @@ def _flat_rows(store):
                    "policy_version": store.policy_version})
     for key, record in store.sessions.items():
         add("sessions", {**_payload("sessions", record), "token_hash": _record_key_for_session(key)})
-    for entity in ("batches", "questions"):
+    for entity in ("batches", "questions", "offline_recognitions"):
         for record in getattr(store, entity).values():
             add(entity, record)
     for upload in store.uploads.values():
@@ -434,6 +435,15 @@ class _ObjectAccess:
 
     def add_question(self, record):
         self._add('questions', record)
+
+    def get_offline(self, record_id):
+        return self._one('offline_recognitions', record_id=record_id)
+
+    def add_offline(self, record):
+        self._add('offline_recognitions', record)
+
+    def interrupted_offline(self):
+        return self._many('offline_recognitions', inference_status='processing')
 
     def list_batches(self, owner_id, page, page_size):
         return self._owned_page('batches', owner_id, page, page_size)
@@ -638,6 +648,35 @@ class _SqlTransaction(_ObjectAccess):
         statement = select(table).where(*conditions).order_by(table.c.created_at.desc(), table.c[PRIMARY_KEYS[entity][0]].desc()).offset((page - 1) * page_size).limit(page_size)
         return RecordPage([self._track(entity, row) for row in self._select(statement)], total)
 
+    def list_offline(self, filters, page, page_size):
+        table = self._tables['offline_recognitions']
+        conditions = [table.c.state == 'complete']
+        if filters.owner_id:
+            conditions.append(table.c.owner_id == filters.owner_id)
+        if filters.names:
+            conditions.append(table.c.current_name.in_(filters.names))
+        if filters.status:
+            conditions.append(table.c.correction_version > 0 if filters.status == 'corrected' else table.c.correction_version == 0)
+        if filters.uploaded_from:
+            conditions.append(table.c.uploaded_at >= filters.uploaded_from)
+        if filters.uploaded_to:
+            conditions.append(table.c.uploaded_at < filters.uploaded_to)
+        if filters.query:
+            owners = select(self._tables['users'].c.user_id).where(or_(
+                self._tables['users'].c.display_name.contains(filters.query, autoescape=True),
+                self._tables['users'].c.username.contains(filters.query, autoescape=True)))
+            conditions.append(or_(table.c.record_id.contains(filters.query, autoescape=True), table.c.owner_id.in_(owners)))
+        total = self._session.execute(select(func.count()).select_from(table).where(*conditions)).scalar_one()
+        statement = select(table).where(*conditions).order_by(table.c.uploaded_at.desc(), table.c.record_id.desc()).offset((page - 1) * page_size).limit(page_size)
+        return RecordPage([self._track('offline_recognitions', row) for row in self._select(statement)], total)
+
+    def offline_names(self, owner_id):
+        table = self._tables['offline_recognitions']
+        conditions = [table.c.state == 'complete']
+        if owner_id:
+            conditions.append(table.c.owner_id == owner_id)
+        return sorted(self._session.execute(select(table.c.current_name).where(*conditions).distinct()).scalars())
+
     def _page(self, entity, page, page_size, *, order):
         table = self._tables[entity]
         total = self._session.execute(select(func.count()).select_from(table)).scalar_one()
@@ -761,6 +800,32 @@ class _MemoryTransaction(_ObjectAccess):
         rows.sort(key=lambda row: (row['created_at'], row[PRIMARY_KEYS[entity][0]]), reverse=True)
         start = (page - 1) * page_size
         return RecordPage(rows[start:start + page_size], len(rows))
+
+    def list_offline(self, filters, page, page_size):
+        rows = []
+        for row in self._all('offline_recognitions'):
+            if row['state'] != 'complete' or (filters.owner_id and row['owner_id'] != filters.owner_id):
+                continue
+            if filters.names and row['current_name'] not in filters.names:
+                continue
+            if filters.status and (row['correction_version'] > 0) != (filters.status == 'corrected'):
+                continue
+            uploaded = datetime.fromisoformat(row['uploaded_at'].replace('Z', '+00:00'))
+            if filters.uploaded_from and uploaded < filters.uploaded_from:
+                continue
+            if filters.uploaded_to and uploaded >= filters.uploaded_to:
+                continue
+            user = self.get_user(row['owner_id']) or {}
+            if filters.query and not any(filters.query in str(value) for value in (row['record_id'], user.get('display_name', ''), user.get('username', ''))):
+                continue
+            rows.append(row)
+        rows.sort(key=lambda row: (row['uploaded_at'], row['record_id']), reverse=True)
+        start = (page - 1) * page_size
+        return RecordPage(rows[start:start + page_size], len(rows))
+
+    def offline_names(self, owner_id):
+        return sorted({row['current_name'] for row in self._all('offline_recognitions')
+                       if row['state'] == 'complete' and (not owner_id or row['owner_id'] == owner_id)})
 
     def _page(self, entity, page, page_size, *, order):
         rows = sorted(self._all(entity), key=lambda row: tuple(row[key] for key in order), reverse=True)

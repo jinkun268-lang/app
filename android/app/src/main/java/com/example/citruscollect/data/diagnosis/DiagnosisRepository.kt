@@ -20,7 +20,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.asRequestBody
 import retrofit2.HttpException
 
-/** Local diagnosis storage never shares image ownership or automatic upload with collection. */
+/** Recognition archives remain separate from voluntary collection/training contributions. */
 class DiagnosisRepository(
     private val dao: DiagnosisDao,
     private val auth: AuthRepository,
@@ -35,7 +35,7 @@ class DiagnosisRepository(
     private val mutex = Mutex()
     private var recovered = false
     private suspend fun ready() {
-        if (!recovered) { dao.recoverInterrupted(); recovered = true }
+        if (!recovered) { dao.recoverInterrupted(); dao.recoverArchiveUploads(); recovered = true }
     }
     private suspend fun owner(): String = auth.currentOwnerKey() ?: throw AuthExpiredException("请先登录")
     private suspend fun checkOwner(expected: String) { if (owner() != expected) throw AuthExpiredException("账号已切换，请重新打开记录") }
@@ -89,6 +89,7 @@ class DiagnosisRepository(
         mutex.withLock {
             ready(); val row = owned(id)
             val previous = row.result()
+            var submittedImage = false
             if (adviceOnly) require(previous != null) { "请先完成图片识别" }
             try {
                 // Room may commit and then resume with cancellation; include this write in cleanup.
@@ -102,7 +103,18 @@ class DiagnosisRepository(
                     val file = File(row.imagePath)
                     require(file.isFile && file.length() in 1..MAX_BYTES) { "本地原图缺失或无效" }
                     val hash = sha256Streaming(file)
-                    val response = auth.authorizedFor(row.ownerKey) { services, token ->
+                    val metadata = DiagnosisInput(row.cropId, row.part, row.treeAge, row.symptom,
+                        java.time.Instant.ofEpochMilli(row.createdAt).toString(), row.mimeType, file.length(), hash)
+                    val prepared = auth.authorizedFor(row.ownerKey) { services, token ->
+                        requireNotNull(services.diagnosis).prepare("Bearer $token", row.id, metadata)
+                    }
+                    require(prepared.record_id == row.id) { "识别记录编号不一致" }
+                    val response = if (prepared.inference_status == "succeeded" || prepared.inference_status == "processing" || (prepared.inference_status == null && prepared.state == "complete")) {
+                        val snapshot = fetchSnapshot(row)
+                        if (snapshot.result == null) applySnapshot(row, snapshot)
+                        requireNotNull(snapshot.result) { "这张图片正在识别，请稍后刷新结果" }
+                    } else auth.authorizedFor(row.ownerKey) { services, token ->
+                        submittedImage = true
                         requireNotNull(services.diagnosis).diagnose("Bearer $token", row.id, row.cropId, row.part, row.treeAge, file.asRequestBody(row.mimeType.toMediaType()))
                     }
                     require(response.recognition.image_id == row.id && response.recognition.sha256 == hash && response.receipt.isNotBlank()) { "识别结果与图片不一致，请重试" }
@@ -110,7 +122,8 @@ class DiagnosisRepository(
                     response
                 }
                 checkOwner(row.ownerKey)
-                dao.update(requireNotNull(dao.get(id)).copy(status = "succeeded", error = null, resultJson = CitrusJson.json.encodeToString(result)))
+                val latest = requireNotNull(dao.get(id))
+                dao.update(latest.copy(status = "succeeded", error = null, archiveState = if (adviceOnly) latest.archiveState else "uploaded", archiveError = null, resultJson = CitrusJson.json.encodeToString(result)))
             } catch (e: Exception) {
                 withContext(NonCancellable) {
                     val latest = dao.get(id)
@@ -121,9 +134,41 @@ class DiagnosisRepository(
                         else -> e.message ?: "识别失败，请重试"
                     }))
                 }
+                if (e is HttpException && submittedImage) runCatching { applySnapshot(row, fetchSnapshot(row)) }
                 throw e
             }
         }
+    }
+    // Compatibility name for the existing report button: only reads server state, never posts model results.
+    suspend fun syncArchive(id: String): Unit = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            ready(); val row = owned(id)
+            try { applySnapshot(row, fetchSnapshot(row)) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                checkOwner(row.ownerKey)
+                val latest = requireNotNull(dao.get(id))
+                dao.update(latest.copy(archiveError = if (e is HttpException) ApiErrors.messageOf(e) else e.message ?: "获取结果失败，请重试"))
+            }
+        }
+    }
+    private suspend fun fetchSnapshot(row: DiagnosisEntity): DiagnosisSnapshot = auth.authorizedFor(row.ownerKey) { services, token ->
+        requireNotNull(services.diagnosis).snapshot("Bearer $token", row.id)
+    }
+    private suspend fun applySnapshot(row: DiagnosisEntity, remote: DiagnosisSnapshot) {
+        require(remote.record_id == row.id && remote.correction_version >= row.correctionVersion) { "识别记录响应无效" }
+        remote.result?.let { require(it.recognition.image_id == row.id) { "识别图片编号不一致" } }
+        checkOwner(row.ownerKey)
+        val latest = requireNotNull(dao.get(row.id))
+        val status = when {
+            remote.result != null -> "succeeded"
+            remote.inference_status == "failed" -> "failed"
+            else -> if (latest.status == "analyzing") "analyzing" else "failed"
+        }
+        dao.update(latest.copy(archiveState = if (remote.state == "complete") "uploaded" else "pending", archiveError = null,
+            status = status, error = if (status == "succeeded") null else remote.inference_error ?: "服务器正在识别，可稍后刷新结果",
+            resultJson = remote.result?.let { CitrusJson.json.encodeToString(it) } ?: latest.resultJson,
+            correctedName = remote.current_name.takeIf { remote.correction_version > 0 }, correctionVersion = remote.correction_version))
     }
     suspend fun saveFollowUp(id: String, date: String?, observation: String) = mutex.withLock {
         ready(); val row = owned(id)

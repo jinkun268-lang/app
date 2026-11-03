@@ -4,6 +4,112 @@
  */
 
 export interface paths {
+    "/offline-recognitions/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Events
+         * @description 鉴权SSE ready/changed事件与心跳，expert/super_admin订阅后重新读取记录快照；只更新页面，不发送消息提醒。
+         */
+        get: operations["events_api_v1_offline_recognitions_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/diagnoses/{record_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Diagnosis */
+        get: operations["get_diagnosis_api_v1_diagnoses__record_id__get"];
+        /** Prepare Diagnosis */
+        put: operations["prepare_diagnosis_api_v1_diagnoses__record_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/offline-recognitions/{record_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detail */
+        get: operations["detail_api_v1_offline_recognitions__record_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/offline-recognitions/{record_id}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Image */
+        get: operations["image_api_v1_offline_recognitions__record_id__image_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/offline-recognitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Records */
+        get: operations["list_records_api_v1_offline_recognitions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/offline-recognitions/{record_id}/correction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Correct */
+        patch: operations["correct_api_v1_offline_recognitions__record_id__correction_patch"];
+        trace?: never;
+    };
     "/training/batches": {
         parameters: {
             query?: never;
@@ -47,7 +153,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Diagnose */
+        /**
+         * Diagnose
+         * @description 完整接收并校验原图后，先提交默认系统识别错误记录并保存原图，再调用现有服务端模型；成功更新同一记录，失败保留原图和原因，不接受手机回传识别结果入库。
+         */
         post: operations["diagnose_api_v1_diagnoses_post"];
         delete?: never;
         options?: never;
@@ -984,6 +1093,202 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** RecognitionRecord */
+        RecognitionRecord: {
+            /** Record Id */
+            record_id: string;
+            /** Owner Display Name */
+            owner_display_name: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "receiving" | "complete";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Uploaded At */
+            uploaded_at: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Current Name */
+            current_name: string;
+            /** Current Class Id */
+            current_class_id: string | null;
+            /** Correction Version */
+            correction_version: number;
+            /** Correction Events */
+            correction_events: components["schemas"]["CorrectionEvent"][];
+            /** Image Url */
+            image_url: string;
+            recognition: components["schemas"]["RecognitionOut"] | null;
+            /** Sha256 */
+            sha256?: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "server" | "device";
+            /**
+             * Crop Id
+             * @enum {string}
+             */
+            crop_id: "huyou" | "xiangyou" | "citrus";
+            /**
+             * Part
+             * @enum {string}
+             */
+            part: "leaf" | "fruit" | "branch";
+            /**
+             * Tree Age
+             * @enum {string}
+             */
+            tree_age: "adult" | "young" | "unknown";
+            /** Symptom */
+            symptom: string;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /** Mime Type */
+            mime_type: string;
+            /** File Size */
+            file_size: number;
+            /** Device Model */
+            device_model: string;
+            /** Inference Status */
+            inference_status?: ("awaiting_image" | "processing" | "succeeded" | "failed") | null;
+            /** Inference Error Code */
+            inference_error_code?: string | null;
+            /** Inference Error */
+            inference_error?: string | null;
+        };
+        /** DiagnosisSnapshot */
+        DiagnosisSnapshot: {
+            /** Record Id */
+            record_id: string;
+            /** State */
+            state: string;
+            /** Inference Status */
+            inference_status: string | null;
+            /** Current Name */
+            current_name: string;
+            /** Correction Version */
+            correction_version: number;
+            /** Inference Error */
+            inference_error: string | null;
+            result: components["schemas"]["DiagnosisOut"] | null;
+        };
+        /** DiagnosisPrepared */
+        DiagnosisPrepared: {
+            /** Record Id */
+            record_id: string;
+            /** State */
+            state: string;
+            /** Inference Status */
+            inference_status: string | null;
+            /** Current Name */
+            current_name: string;
+        };
+        /** DiagnosisInput */
+        DiagnosisInput: {
+            /**
+             * Crop Id
+             * @default huyou
+             * @enum {string}
+             */
+            crop_id: "huyou" | "xiangyou" | "citrus";
+            /**
+             * Part
+             * @default leaf
+             * @enum {string}
+             */
+            part: "leaf" | "fruit" | "branch";
+            /**
+             * Tree Age
+             * @default unknown
+             * @enum {string}
+             */
+            tree_age: "adult" | "young" | "unknown";
+            /**
+             * Symptom
+             * @default
+             */
+            symptom: string;
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /**
+             * Mime Type
+             * @enum {string}
+             */
+            mime_type: "image/jpeg" | "image/png" | "image/webp";
+            /** File Size */
+            file_size: number;
+            /** Sha256 */
+            sha256: string;
+            /**
+             * Device Model
+             * @default
+             */
+            device_model: string;
+        };
+        /** CorrectionEvent */
+        CorrectionEvent: {
+            /** Version */
+            version: number;
+            /** From Name */
+            from_name: string;
+            /** From Class Id */
+            from_class_id: string | null;
+            /** Name */
+            name: string;
+            /** Class Id */
+            class_id: string | null;
+            /** Note */
+            note: string;
+            /** Operator */
+            operator: string;
+            /** Operator Id */
+            operator_id: string;
+            /**
+             * Corrected At
+             * Format: date-time
+             */
+            corrected_at: string;
+        };
+        /** CorrectionIn */
+        CorrectionIn: {
+            /** Expected Version */
+            expected_version: number;
+            /** Name */
+            name: string;
+            /** Class Id */
+            class_id?: string | null;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** OfflinePage */
+        OfflinePage: {
+            /** Items */
+            items: components["schemas"]["RecognitionRecord"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Categories */
+            categories: string[];
+        };
         /** Action */
         Action: {
             /** Title */
@@ -2023,6 +2328,351 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    events_api_v1_offline_recognitions_events_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE ready / changed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Role forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_diagnosis_api_v1_diagnoses__record_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                record_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosisSnapshot"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Role forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    prepare_diagnosis_api_v1_diagnoses__record_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                record_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiagnosisInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosisPrepared"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Role forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    detail_api_v1_offline_recognitions__record_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                record_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecognitionRecord"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Role forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    image_api_v1_offline_recognitions__record_id__image_get: {
+        parameters: {
+            query?: {
+                preview?: boolean;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                record_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authenticated original or EXIF-free preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "image/png": string;
+                    "image/webp": string;
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Role forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_records_api_v1_offline_recognitions_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                names?: string[];
+                status?: ("original" | "corrected") | null;
+                uploaded_from?: string | null;
+                uploaded_to?: string | null;
+                query?: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OfflinePage"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Role forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    correct_api_v1_offline_recognitions__record_id__correction_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                record_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrectionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecognitionRecord"];
+                };
+            };
+            /** @description Authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Role forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     listTrainingBatches: {
         parameters: {
             query?: {

@@ -1,4 +1,4 @@
-"""Authenticated, bounded single-image inference. Images are temporary, never training labels."""
+"""Bounded server inference with explicit original retention for diagnosis archives."""
 from __future__ import annotations
 
 import base64
@@ -20,11 +20,10 @@ from pydantic import BaseModel, Field
 
 from .common import DomainError, iso_utc, require_roles
 from .resources import UploadWork
+from .recognition_images import MAX_BYTES, MAX_PIXELS
 
 router = APIRouter(prefix="/api/v1")
 logger = logging.getLogger(__name__)
-MAX_BYTES = 20 * 1024 * 1024
-MAX_PIXELS = 24_000_000
 UUID7 = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
 
@@ -224,18 +223,28 @@ def _prepare(data: bytes) -> bytes:
 @router.post("/recognitions", response_model=RecognitionOut, tags=["recognition"], summary="识别一张尚未上传的采集图片")
 async def recognize(request: Request, image_id: str = Header(alias="X-Image-ID"),
                     _user: dict = Depends(require_roles("collector"))) -> RecognitionOut:
+    with request.app.state.upload_work.admit():
+        data, _ = await read_original(request, image_id)
+    return await infer_original(request, image_id, data)
+
+
+async def read_original(request: Request, image_id: str) -> tuple[bytes, str]:
     if not UUID7.fullmatch(image_id):
         raise DomainError(422, "VALIDATION_ERROR", "图片编号必须为UUIDv7")
     if request.headers.get("content-type", "").split(";")[0].lower() not in {"image/jpeg", "image/png", "image/webp"}:
         raise DomainError(415, "UNSUPPORTED_MEDIA", "只接受JPEG、PNG或WebP图片")
+    data = bytearray()
+    async for chunk in request.stream():
+        if len(data) + len(chunk) > MAX_BYTES:
+            raise DomainError(413, "PAYLOAD_TOO_LARGE", "单张识别图片不能超过20MiB")
+        data.extend(chunk)
+    return bytes(data), request.headers['content-type'].split(';')[0].lower()
+
+
+async def infer_original(request: Request, image_id: str, data: bytes) -> RecognitionOut:
     work: UploadWork = request.app.state.recognition_work
     with work.admit():
-        data = bytearray()
-        async for chunk in request.stream():
-            if len(data) + len(chunk) > MAX_BYTES:
-                raise DomainError(413, "PAYLOAD_TOO_LARGE", "单张识别图片不能超过20MiB")
-            data.extend(chunk)
-        prepared = await work.run(_prepare, bytes(data))
+        prepared = await work.run(_prepare, data)
         # 先用检测器判断画面里有没有叶片；有则按最大叶片框裁剪后再分类。
         detection, crop = await work.run(request.app.state.detector.detect, prepared)
         if detection is not None and not detection.get("leaf_detected"):
@@ -248,8 +257,9 @@ async def recognize(request: Request, image_id: str = Header(alias="X-Image-ID")
                     row = store.get_class(candidate.class_id) if candidate.class_id else None
                     if row is None or not row.get("is_active"):
                         candidate.class_id = None
-            return RecognitionOut(image_id=image_id, sha256=hashlib.sha256(data).hexdigest(),
+            result = RecognitionOut(image_id=image_id, sha256=hashlib.sha256(data).hexdigest(),
                 model=raw["model"], model_version=raw["model_version"], scope=raw["scope"],
                 candidates=candidates, warning=raw["warning"], created_at=iso_utc())
         except (KeyError, TypeError, ValueError) as exc:
             raise DomainError(503, "MODEL_UNAVAILABLE", "模型返回结果无效，请稍后重试") from exc
+        return result

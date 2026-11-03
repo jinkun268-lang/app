@@ -22,7 +22,8 @@
 
 ## API
 
-- `POST /api/v1/diagnoses`：collector 认证；原始 JPEG/PNG/WebP body、X-Image-ID UUIDv7。query crop_id 默认 huyou、part 默认 leaf、tree_age 默认 unknown。图片上限20MiB/2400万像素，与旧 recognition 共用单并发和推理。返回 `{recognition, advice, receipt}`；不创建 samples。
+- `POST /api/v1/diagnoses`：collector认证，X-Image-ID UUIDv7，JPEG／PNG／WebP原图body；沿用crop_id／part／tree_age query。完整校验后先提交默认识别记录并保存原图，再调用现有模型，成功直接更新结果，失败保留默认结果和原因；不创建samples。返回`{recognition, advice, receipt}`，模型失败仍返回对应错误状态，但图片和识别记录已保留。无需客户端回传结果入库。
+- `PUT /api/v1/diagnoses/{record_id}`：上传前提交图片SHA／大小、作物／部位／树龄、现象与拍摄时间。`GET`同一路径可读取本人记录状态和已完成结果，失败／识别中result为null。
 - `POST /api/v1/diagnoses/advice`：collector 认证；JSON `{receipt}`。返回 advice 本身，重新读取当前知识，不再次推理。不能传入自选类别或上下文。
 - advice 包含 status（matched/uncertain/healthy/unmapped/conflict/unavailable）、title、message、actions（title/detail）、sources（title/url）、version（字符串或 null）。只有 matched 有针对性动作。
 - receipt 为 HMAC-SHA256 签名、不加密的凭据，绑定 user_id、完整识别结果和作物/部位/树龄，30天过期。不要作为公开分享链接。篡改/过期返回422 INVALID_RECEIPT，其他账号使用返回403 RECEIPT_FORBIDDEN；注销/停用仍受现有认证控制。

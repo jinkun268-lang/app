@@ -39,6 +39,7 @@ export interface RawResponse {
   status: number
   headers: Record<string, string>
   body: string | Blob | null
+  stream?: ReadableStream<Uint8Array>
 }
 
 export interface RequestOptions {
@@ -49,7 +50,7 @@ export interface RequestOptions {
   form?: FormData
   headers?: Record<string, string>
   signal?: AbortSignal
-  responseType?: 'json' | 'blob' | 'none'
+  responseType?: 'json' | 'blob' | 'none' | 'stream'
   skipAuth?: boolean
   idempotencyKey?: string
 }
@@ -110,6 +111,7 @@ function apiErrorToRawResponse(err: ApiError): RawResponse {
 }
 
 interface DispatchInput {
+  stream?: boolean
   method: string
   url: string
   headers: Record<string, string>
@@ -139,6 +141,7 @@ async function dispatch(input: DispatchInput): Promise<RawResponse> {
   res.headers.forEach((v, k) => {
     headers[k.toLowerCase()] = v
   })
+  if (input.stream && res.ok) return { status: res.status, headers, body: null, stream: res.body || undefined }
   const body = isBinary ? await res.blob() : await res.text()
   return { status: res.status, headers, body }
 }
@@ -234,7 +237,7 @@ async function rawRequest(opts: RequestOptions): Promise<RawResponse> {
   }
   Object.assign(headers, opts.headers || {})
 
-  let res = await dispatch({ method, url: target, headers, body, signal: opts.signal })
+  let res = await dispatch({ method, url: target, headers, body, signal: opts.signal, stream: opts.responseType === 'stream' })
 
   if (isExpiredAuth(res.status, res) && !opts.skipAuth) {
     if (getSessionEpoch() !== sentEpoch) {
@@ -246,7 +249,7 @@ async function rawRequest(opts: RequestOptions): Promise<RawResponse> {
     if (current && current !== access) {
       // 迟到的旧 401：请求携带的令牌已被并发刷新轮换，直接复用当前令牌重放一次
       headers.authorization = `Bearer ${current}`
-      res = await dispatch({ method, url: target, headers, body, signal: opts.signal })
+      res = await dispatch({ method, url: target, headers, body, signal: opts.signal, stream: opts.responseType === 'stream' })
     } else {
       const outcome = await refreshOnce(sentEpoch)
       if (getSessionEpoch() !== sentEpoch) {
@@ -255,7 +258,7 @@ async function rawRequest(opts: RequestOptions): Promise<RawResponse> {
       }
       if (outcome.kind === 'ok' && getAccessToken()) {
         headers.authorization = `Bearer ${getAccessToken() as string}`
-        res = await dispatch({ method, url: target, headers, body, signal: opts.signal })
+        res = await dispatch({ method, url: target, headers, body, signal: opts.signal, stream: opts.responseType === 'stream' })
       } else if (outcome.kind === 'temporary') {
         // 临时刷新故障：保留会话与刷新令牌，向调用者返回可理解的错误，不重放
         return apiErrorToRawResponse(outcome.error)
@@ -281,7 +284,11 @@ function parseResponse<T>(res: RawResponse, responseType?: RequestOptions['respo
   }
   if (responseType === 'blob') {
     if (res.body instanceof Blob) return res.body as T
-    return new Blob([res.body ?? ''], { type: res.headers['content-type'] || 'application/octet-stream' }) as T
+    return new Blob([typeof res.body === 'string' ? res.body : ''], { type: res.headers['content-type'] || 'application/octet-stream' }) as T
+  }
+  if (responseType === 'stream') {
+    if (res.stream) return res.stream as T
+    throw new ApiError(502, 'INTERNAL', '实时更新响应无效', res.headers['x-request-id'])
   }
   if (typeof res.body === 'string' && res.body !== '') {
     try {
