@@ -36,13 +36,14 @@ from typing import Any, BinaryIO, Iterator, Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.background import BackgroundTask
 
 from .common import DomainError, iso_utc, new_uuid7, require_roles
 from .data_access import DataTransaction, FileStorage, MetadataStorage, SampleFilter, StorageUnavailable
 from .review import beijing_day_bound, parse_utc
 from .resources import ServiceLimits
+from .training import REVIEWED, batch_in_dates, candidate_images, validate_dates
 
 router = APIRouter(prefix="/api/v1")
 
@@ -73,6 +74,34 @@ class ExportCreateIn(BaseModel):
     uploaded_to: date | None = None
     final_cultivar_id: str | None = None
     final_class_id: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=48)
+    batch_ids: list[str] | None = Field(default=None, min_length=1, max_length=1000)
+    batch_created_from: date | None = None
+    batch_created_to: date | None = None
+    class_ids: list[str] = Field(default_factory=list, max_length=1000)
+    cultivar_ids: list[str] = Field(default_factory=list, max_length=1000)
+    review_status: Literal['reviewed', 'unreviewed', 'all'] = 'reviewed'
+    quality_status: Literal['usable', 'pending', 'unusable', 'all'] = 'usable'
+    image_ids: list[str] | None = Field(default=None, min_length=1, max_length=10000)
+
+    @model_validator(mode='after')
+    def check_scope(self):
+        validate_dates(self.batch_created_from, self.batch_created_to)
+        validate_dates(self.uploaded_from, self.uploaded_to)
+        if self.batch_ids is None and (self.name is not None or self.image_ids is not None or self.class_ids or self.cultivar_ids
+                                      or self.batch_created_from or self.batch_created_to
+                                      or self.review_status != 'reviewed' or self.quality_status != 'usable'):
+            raise ValueError('新的选图条件必须同时指定采集批次')
+        if self.batch_ids is not None and (self.uploaded_from or self.uploaded_to
+                                          or self.final_class_id or self.final_cultivar_id):
+            raise ValueError('按批次导出不接受旧版上传日期或单选类别条件')
+        if self.review_status == 'unreviewed' and self.quality_status != 'all':
+            self.quality_status = 'all'
+        if self.name is not None:
+            self.name = self.name.strip()
+            if not self.name:
+                raise ValueError('任务名称不能为空')
+        return self
 
 
 # ---------------- 幂等 ----------------
@@ -88,7 +117,11 @@ def _idempotency_slot(user: dict[str, Any], operation: str, key: str) -> str:
 
 
 def _request_hash(payload: BaseModel) -> str:
-    blob = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    values = payload.model_dump(mode="json")
+    # Preserve hashes of legacy requests across this additive API upgrade.
+    if isinstance(payload, ExportCreateIn) and payload.batch_ids is None:
+        values = {key: values[key] for key in ('format', 'uploaded_from', 'uploaded_to', 'final_cultivar_id', 'final_class_id')}
+    blob = json.dumps(values, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
@@ -155,6 +188,8 @@ def _replay(store, slot, request_hash, scope):
 
 def _snapshot_items(store: DataTransaction, payload: ExportCreateIn, limits: ServiceLimits) -> list[dict[str, Any]]:
     """按导出资格固定条目（含原图 file_key 与 SHA）；结果排序稳定（sample_id, image_id）。"""
+    if payload.batch_ids is not None:
+        return _batch_snapshot_items(store, payload, limits)
     lower = beijing_day_bound(payload.uploaded_from, end=False) if payload.uploaded_from else None
     upper = beijing_day_bound(payload.uploaded_to, end=True) if payload.uploaded_to else None
 
@@ -216,6 +251,49 @@ def _snapshot_items(store: DataTransaction, payload: ExportCreateIn, limits: Ser
             break
         page += 1
     items.sort(key=lambda item: (item["sample_id"], item["image_id"]))
+    return items
+
+
+def _batch_snapshot_items(store, payload, limits):
+    selected = set(payload.image_ids) if payload.image_ids is not None else None
+    items, total_bytes = [], 0
+    for batch_id in sorted(set(payload.batch_ids)):
+        batch = store.get_batch(batch_id)
+        if batch is None or not batch_in_dates(batch, payload.batch_created_from, payload.batch_created_to):
+            raise DomainError(409, 'STATE_CONFLICT', '所选批次不存在或已超出创建日期范围')
+        for sample, image, dimensions in candidate_images(store, batch_id, payload.class_ids, payload.cultivar_ids):
+            reviewed = sample['review_status'] in REVIEWED
+            if selected is not None:
+                if image['image_id'] not in selected:
+                    continue
+            else:
+                if payload.review_status == 'reviewed' and not reviewed:
+                    continue
+                if payload.review_status == 'unreviewed' and sample['review_status'] != 'unreviewed':
+                    continue
+                if payload.quality_status != 'all' and (not reviewed or image['quality_status'] != payload.quality_status):
+                    continue
+            ext = _EXT_BY_MIME.get(image['mime_type'])
+            if ext is None:
+                continue
+            total_bytes += image['file_size']
+            if len(items) >= limits.export_max_images or total_bytes > limits.export_max_bytes:
+                raise _export_too_large(limits)
+            metadata = {key: sample.get(key) for key in
+                        ('batch_id', 'latitude', 'longitude', 'location_accuracy_m')}
+            metadata['batch_snapshot'] = dict(batch)
+            metadata['training'] = {**dimensions, 'review_status': sample['review_status'],
+                                    'quality_status': image['quality_status'] if reviewed else 'not_assessed',
+                                    'label_source': 'expert_review' if reviewed else 'collector_reported'}
+            items.append(dict(image_id=image['image_id'], sample_id=sample['sample_id'],
+                              file_name=f"{image['image_id']}.{ext}", class_id=dimensions['class_id'] or 'unknown',
+                              class_name=dimensions['class_name'], collection_metadata=metadata,
+                              file_key=image.get('file_key'), sha256=image.get('sha256')))
+    if selected is not None and selected != {item['image_id'] for item in items}:
+        raise DomainError(409, 'STATE_CONFLICT', '部分选中图片已不在当前批次或类别、品种范围内，请刷新后重新选图')
+    if not items:
+        raise DomainError(422, 'VALIDATION_FAILED', '当前条件未选中可导出的已上传图片')
+    items.sort(key=lambda item: (item['sample_id'], item['image_id']))
     return items
 
 
@@ -303,9 +381,12 @@ def _write_zip(archive: zipfile.ZipFile, files: FileStorage, items: list[dict[st
     budget = [max_bytes]
     for item in items:
         _copy_original(archive, files, item, snapshot_at, budget)
+    training = any((item.get('collection_metadata') or {}).get('training') for item in items)
+    fields = ['review_status', 'quality_status', 'label_source', 'cultivar_id', 'cultivar_name'] if training else []
     labels = _csv_bytes(
-        ["image_id", "sample_id", "file_name", "class_id"],
-        [[item["image_id"], item["sample_id"], item["file_name"], item["class_id"]] for item in items],
+        ["image_id", "sample_id", "file_name", "class_id", *fields],
+        [[item["image_id"], item["sample_id"], item["file_name"], item["class_id"],
+          *((item.get('collection_metadata') or {}).get('training', {}).get(key) or '' for key in fields)] for item in items],
     )
     archive.writestr(_zip_entry("labels.csv", snapshot_at, zipfile.ZIP_DEFLATED), labels)
     metadata_rows = []
@@ -446,13 +527,8 @@ def create_export(
             job = {
                 "export_id": new_uuid7(),
                 "format": payload.format,
-                "filters": {
-                    "uploaded_from": payload.uploaded_from.isoformat() if payload.uploaded_from else None,
-                    "uploaded_to": payload.uploaded_to.isoformat() if payload.uploaded_to else None,
-                    "final_cultivar_id": payload.final_cultivar_id,
-                    "final_class_id": payload.final_class_id,
-                    "format": payload.format,
-                },
+                "filters": {**payload.model_dump(mode='json'),
+                            'batch_snapshots': [dict(store.get_batch(key)) for key in dict.fromkeys(payload.batch_ids or [])]},
                 "snapshot_at": now,
                 "taxonomy_version": store.get_config()["taxonomy_version"],
                 "item_count": len(items),

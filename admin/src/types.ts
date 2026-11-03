@@ -99,3 +99,8 @@ export type Batch = Schemas['Batch']
 export type BatchPage = Schemas['BatchPage']
 export type CollectionQuestion = Schemas['CollectionQuestion']
 export type CollectionQuestionPage = Schemas['CollectionQuestionPage']
+
+export type TrainingBatch = Schemas['TrainingBatch']
+export type TrainingBatchPage = Schemas['TrainingBatchPage']
+export type TrainingImage = Schemas['TrainingImage']
+export type TrainingImagePage = Schemas['TrainingImagePage']

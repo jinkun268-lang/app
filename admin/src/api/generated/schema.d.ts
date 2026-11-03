@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/training/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 训练数据批次及已上传图片统计 */
+        get: operations["listTrainingBatches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/training/batches/{batch_id}/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 批次内已上传且未排除的图片 */
+        get: operations["listTrainingImages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/diagnoses": {
         parameters: {
             query?: never;
@@ -591,7 +625,7 @@ export interface paths {
         put?: never;
         /**
          * 创建导出快照
-         * @description 单API进程有界执行；忙或超过账号频率返回429及Retry-After，同键重放不重复占用配额。默认同时1批、每账号每分钟6批、单批5000图且ZIP不超过1GiB，超范围413。
+         * @description 按 batch_ids 导出任意状态采集批次；batch_created_from/to 只限定批次创建日期。class_ids、cultivar_ids 同项并集、跨项交集；核验及质量状态决定默认选图，image_ids 可覆盖默认但不能越过批次、日期、类别、品种及未排除的已上传范围。无 batch_ids 时保留旧版已核验可用图片筛选。单API进程有界执行；默认同时1批、每账号每分钟6批、单批5000图且ZIP不超过1GiB；忙返回429及Retry-After，超范围413。
          */
         post: operations["createExport"];
         delete?: never;
@@ -645,7 +679,7 @@ export interface paths {
         put?: never;
         /**
          * 失败批次按原快照重试
-         * @description 单API进程有界执行；忙或超过账号频率返回429及Retry-After，同键重放不重复占用配额。默认同时1批、每账号每分钟6批、单批5000图且ZIP不超过1GiB，超范围413。
+         * @description 按 batch_ids 导出任意状态采集批次；batch_created_from/to 只限定批次创建日期。class_ids、cultivar_ids 同项并集、跨项交集；核验及质量状态决定默认选图，image_ids 可覆盖默认但不能越过批次、日期、类别、品种及未排除的已上传范围。无 batch_ids 时保留旧版已核验可用图片筛选。单API进程有界执行；默认同时1批、每账号每分钟6批、单批5000图且ZIP不超过1GiB；忙返回429及Retry-After，超范围413。
          */
         post: operations["retryExport"];
         delete?: never;
@@ -1528,7 +1562,62 @@ export interface components {
             upload_completed_at: string;
             image_count: number;
         };
+        TrainingBatch: components["schemas"]["Batch"] & {
+            image_count: number;
+            reviewed_count: number;
+            pending_count: number;
+            usable_count: number;
+            unusable_count: number;
+        };
+        TrainingImage: components["schemas"]["SampleImage"] & {
+            sample_id: string;
+            batch_id: string | null;
+            tree_id: string | null;
+            class_id: string | null;
+            class_name: string | null;
+            cultivar_id: string | null;
+            cultivar_name: string | null;
+            review_status: components["schemas"]["ReviewStatus"];
+            /** Format: date-time */
+            uploaded_at: string;
+        };
+        TrainingBatchPage: {
+            items: components["schemas"]["TrainingBatch"][];
+            total: number;
+            page: number;
+            page_size: number;
+        };
+        TrainingImagePage: {
+            items: components["schemas"]["TrainingImage"][];
+            total: number;
+            page: number;
+            page_size: number;
+        };
         ExportFilters: {
+            /** @description 创建任务时冻结的批次名称及日期 */
+            batch_snapshots?: components["schemas"]["Batch"][];
+            name?: string | null;
+            batch_ids?: string[] | null;
+            /** Format: date */
+            batch_created_from?: string | null;
+            /** Format: date */
+            batch_created_to?: string | null;
+            /** @description 同项取并集，与品种条件取交集；空数组表示不限 */
+            class_ids?: string[];
+            cultivar_ids?: string[];
+            /**
+             * @description 默认选图条件；手动 image_ids 可覆盖此条件
+             * @default reviewed
+             * @enum {string}
+             */
+            review_status: "reviewed" | "unreviewed" | "all";
+            /**
+             * @default usable
+             * @enum {string}
+             */
+            quality_status: "usable" | "pending" | "unusable" | "all";
+            /** @description 精确选图；服务端仍检查批次、日期、类别、品种、排除及已上传范围 */
+            image_ids?: string[] | null;
             /** Format: date */
             uploaded_from?: string | null;
             /** Format: date */
@@ -1539,6 +1628,28 @@ export interface components {
             format?: "dataset";
         };
         ExportCreateRequest: {
+            name?: string | null;
+            batch_ids?: string[] | null;
+            /** Format: date */
+            batch_created_from?: string | null;
+            /** Format: date */
+            batch_created_to?: string | null;
+            /** @description 同项取并集，与品种条件取交集；空数组表示不限 */
+            class_ids?: string[];
+            cultivar_ids?: string[];
+            /**
+             * @description 默认选图条件；手动 image_ids 可覆盖此条件
+             * @default reviewed
+             * @enum {string}
+             */
+            review_status: "reviewed" | "unreviewed" | "all";
+            /**
+             * @default usable
+             * @enum {string}
+             */
+            quality_status: "usable" | "pending" | "unusable" | "all";
+            /** @description 精确选图；服务端仍检查批次、日期、类别、品种、排除及已上传范围 */
+            image_ids?: string[] | null;
             /** @enum {string} */
             format: "dataset";
             /** Format: date */
@@ -1912,6 +2023,55 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listTrainingBatches: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 批次列表；仅 admin／super_admin */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingBatchPage"];
+                };
+            };
+        };
+    };
+    listTrainingImages: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                reviewed_only?: boolean;
+            };
+            header?: never;
+            path: {
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 图片及有效类别／品种；仅 admin／super_admin */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrainingImagePage"];
+                };
+            };
+        };
+    };
     diagnose_api_v1_diagnoses_post: {
         parameters: {
             query?: {
@@ -3038,7 +3198,15 @@ export interface operations {
             };
             401: components["responses"]["AuthRequired"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            /** @description 幂等键内容不一致，或所选图片／批次已不在允许范围内 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["ValidationFailed"];
             429: components["responses"]["RateLimited"];
