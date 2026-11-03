@@ -84,6 +84,15 @@ if systemctl list-unit-files 2>/dev/null | grep -q '^citrus-inference\.service';
   systemctl reload-or-restart citrus-inference || log "推理服务重启失败，API 将退回子进程推理"
 fi
 
+# 网关配置由 deploy/nginx/render.py 生成；模板有变化时重新渲染并热加载，失败则保持原配置。
+if [ -x "$APP_ROOT/render-gateway.sh" ]; then
+  if "$APP_ROOT/render-gateway.sh" >/dev/null 2>&1; then
+    log "网关配置已重新渲染并生效"
+  else
+    log "网关配置渲染失败，保持原配置"
+  fi
+fi
+
 # 5. 健康检查
 for i in $(seq 1 "$ATTEMPTS"); do
   if BODY="$(curl -fsS --max-time 3 "$HEALTH" 2>/dev/null)"; then

@@ -119,7 +119,7 @@ server {{
     location / {{ return 308 https://{args.domain}{'' if args.https_port == 443 else ':' + str(args.https_port)}$request_uri; }}
 }}
 """
-        servers += application_server(frontend, args.upstream, f"{args.https_port} ssl", args.domain, tls)
+        servers += application_server(frontend, args.upstream, f"{args.https_port} ssl http2", args.domain, tls)
     else:
         servers = application_server(frontend, args.upstream, f"127.0.0.1:{args.port}", "localhost 127.0.0.1")
     # Official Windows builds also initialize unused FastCGI/uWSGI/SCGI temp
