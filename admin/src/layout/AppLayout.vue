@@ -186,7 +186,7 @@ const groups = computed(() => {
     ] })
   }
   if (auth.isExpert || auth.isSuper) {
-    g.push({ key: 'questions', label: '专家咨询', items: [{ to: '/questions', label: '咨询答复', icon: ClipboardList }] })
+    g.push({ key: 'questions', label: '专家咨询', items: [{ to: '/questions', label: '咨询答复', icon: ClipboardList }, { to: '/offline-recognitions', label: '离线识别', icon: Images }] })
   }
   if (!realMode && (auth.isExpert || auth.isSuper)) {
     g.push({ key: 'qa', label: '专家工单', items: [{ to: '/tickets', label: '工单队列', icon: ClipboardList }] })

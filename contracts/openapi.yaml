@@ -40,6 +40,366 @@ tags:
     description: 专家工单（F2 / M2）
 
 paths:
+  /offline-recognitions/events:
+    get:
+      tags:
+      - offline-recognitions
+      summary: Events
+      operationId: events_api_v1_offline_recognitions_events_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: SSE ready / changed
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+        '403':
+          description: Role forbidden
+      security:
+      - bearerAuth: []
+      description: 鉴权SSE ready/changed事件与心跳，expert/super_admin订阅后重新读取记录快照；只更新页面，不发送消息提醒。
+  /diagnoses/{record_id}:
+    put:
+      tags:
+      - diagnosis
+      summary: Prepare Diagnosis
+      operationId: prepare_diagnosis_api_v1_diagnoses__record_id__put
+      parameters:
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Record Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiagnosisInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosisPrepared'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+        '403':
+          description: Role forbidden
+      security:
+      - bearerAuth: []
+    get:
+      tags:
+      - diagnosis
+      summary: Get Diagnosis
+      operationId: get_diagnosis_api_v1_diagnoses__record_id__get
+      parameters:
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Record Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosisSnapshot'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+        '403':
+          description: Role forbidden
+      security:
+      - bearerAuth: []
+  /offline-recognitions/{record_id}:
+    get:
+      tags:
+      - offline-recognitions
+      summary: Detail
+      operationId: detail_api_v1_offline_recognitions__record_id__get
+      parameters:
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Record Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecognitionRecord'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+        '403':
+          description: Role forbidden
+      security:
+      - bearerAuth: []
+  /offline-recognitions/{record_id}/image:
+    get:
+      tags:
+      - offline-recognitions
+      summary: Image
+      operationId: image_api_v1_offline_recognitions__record_id__image_get
+      parameters:
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Record Id
+      - name: preview
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Preview
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Authenticated original or EXIF-free preview
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+        '403':
+          description: Role forbidden
+      security:
+      - bearerAuth: []
+  /offline-recognitions:
+    get:
+      tags:
+      - offline-recognitions
+      summary: List Records
+      operationId: list_records_api_v1_offline_recognitions_get
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Page Size
+      - name: names
+        in: query
+        required: false
+        schema:
+          type: array
+          items:
+            type: string
+          maxItems: 100
+          default: []
+          title: Names
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - enum:
+            - original
+            - corrected
+            type: string
+          - type: 'null'
+          title: Status
+      - name: uploaded_from
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Uploaded From
+      - name: uploaded_to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Uploaded To
+      - name: query
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 100
+          default: ''
+          title: Query
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfflinePage'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+        '403':
+          description: Role forbidden
+      security:
+      - bearerAuth: []
+  /offline-recognitions/{record_id}/correction:
+    patch:
+      tags:
+      - offline-recognitions
+      summary: Correct
+      operationId: correct_api_v1_offline_recognitions__record_id__correction_patch
+      parameters:
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Record Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrectionIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecognitionRecord'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+        '403':
+          description: Role forbidden
+      security:
+      - bearerAuth: []
   /training/batches:
     get:
       tags: [training]
@@ -75,6 +435,7 @@ paths:
       tags:
       - diagnosis
       summary: Diagnose
+      description: 完整接收并校验原图后，先提交默认系统识别错误记录并保存原图，再调用现有服务端模型；成功更新同一记录，失败保留原图和原因，不接受手机回传识别结果入库。
       operationId: diagnose_api_v1_diagnoses_post
       parameters:
       - name: crop_id
@@ -1701,6 +2062,379 @@ components:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
 
   schemas:
+    RecognitionRecord:
+      properties:
+        record_id:
+          type: string
+          title: Record Id
+        owner_display_name:
+          type: string
+          title: Owner Display Name
+        state:
+          type: string
+          enum:
+          - receiving
+          - complete
+          title: State
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        uploaded_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Uploaded At
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+        current_name:
+          type: string
+          title: Current Name
+        current_class_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Current Class Id
+        correction_version:
+          type: integer
+          title: Correction Version
+        correction_events:
+          items:
+            $ref: '#/components/schemas/CorrectionEvent'
+          type: array
+          title: Correction Events
+        image_url:
+          type: string
+          title: Image Url
+        recognition:
+          anyOf:
+          - $ref: '#/components/schemas/RecognitionOut'
+          - type: 'null'
+        sha256:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sha256
+        source:
+          type: string
+          enum:
+          - server
+          - device
+          title: Source
+        crop_id:
+          type: string
+          enum:
+          - huyou
+          - xiangyou
+          - citrus
+          title: Crop Id
+        part:
+          type: string
+          enum:
+          - leaf
+          - fruit
+          - branch
+          title: Part
+        tree_age:
+          type: string
+          enum:
+          - adult
+          - young
+          - unknown
+          title: Tree Age
+        symptom:
+          type: string
+          title: Symptom
+        captured_at:
+          type: string
+          format: date-time
+          title: Captured At
+        mime_type:
+          type: string
+          title: Mime Type
+        file_size:
+          type: integer
+          title: File Size
+        device_model:
+          type: string
+          title: Device Model
+        inference_status:
+          anyOf:
+          - type: string
+            enum:
+            - awaiting_image
+            - processing
+            - succeeded
+            - failed
+          - type: 'null'
+          title: Inference Status
+        inference_error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Inference Error Code
+        inference_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Inference Error
+      additionalProperties: false
+      type: object
+      required:
+      - record_id
+      - owner_display_name
+      - state
+      - created_at
+      - uploaded_at
+      - current_name
+      - current_class_id
+      - correction_version
+      - correction_events
+      - image_url
+      - recognition
+      - source
+      - crop_id
+      - part
+      - tree_age
+      - symptom
+      - captured_at
+      - mime_type
+      - file_size
+      - device_model
+      title: RecognitionRecord
+    DiagnosisSnapshot:
+      properties:
+        record_id:
+          type: string
+          title: Record Id
+        state:
+          type: string
+          title: State
+        inference_status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Inference Status
+        current_name:
+          type: string
+          title: Current Name
+        correction_version:
+          type: integer
+          title: Correction Version
+        inference_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Inference Error
+        result:
+          anyOf:
+          - $ref: '#/components/schemas/DiagnosisOut'
+          - type: 'null'
+      type: object
+      required:
+      - record_id
+      - state
+      - inference_status
+      - current_name
+      - correction_version
+      - inference_error
+      - result
+      title: DiagnosisSnapshot
+    DiagnosisPrepared:
+      properties:
+        record_id:
+          type: string
+          title: Record Id
+        state:
+          type: string
+          title: State
+        inference_status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Inference Status
+        current_name:
+          type: string
+          title: Current Name
+      type: object
+      required:
+      - record_id
+      - state
+      - inference_status
+      - current_name
+      title: DiagnosisPrepared
+    DiagnosisInput:
+      properties:
+        crop_id:
+          type: string
+          enum:
+          - huyou
+          - xiangyou
+          - citrus
+          title: Crop Id
+          default: huyou
+        part:
+          type: string
+          enum:
+          - leaf
+          - fruit
+          - branch
+          title: Part
+          default: leaf
+        tree_age:
+          type: string
+          enum:
+          - adult
+          - young
+          - unknown
+          title: Tree Age
+          default: unknown
+        symptom:
+          type: string
+          maxLength: 2000
+          title: Symptom
+          default: ''
+        captured_at:
+          type: string
+          format: date-time
+          title: Captured At
+        mime_type:
+          type: string
+          enum:
+          - image/jpeg
+          - image/png
+          - image/webp
+          title: Mime Type
+        file_size:
+          type: integer
+          maximum: 20971520.0
+          minimum: 1.0
+          title: File Size
+        sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+          title: Sha256
+        device_model:
+          type: string
+          maxLength: 100
+          title: Device Model
+          default: ''
+      additionalProperties: false
+      type: object
+      required:
+      - captured_at
+      - mime_type
+      - file_size
+      - sha256
+      title: DiagnosisInput
+    CorrectionEvent:
+      properties:
+        version:
+          type: integer
+          title: Version
+        from_name:
+          type: string
+          title: From Name
+        from_class_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: From Class Id
+        name:
+          type: string
+          title: Name
+        class_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Class Id
+        note:
+          type: string
+          title: Note
+        operator:
+          type: string
+          title: Operator
+        operator_id:
+          type: string
+          title: Operator Id
+        corrected_at:
+          type: string
+          format: date-time
+          title: Corrected At
+      type: object
+      required:
+      - version
+      - from_name
+      - from_class_id
+      - name
+      - class_id
+      - note
+      - operator
+      - operator_id
+      - corrected_at
+      title: CorrectionEvent
+    CorrectionIn:
+      properties:
+        expected_version:
+          type: integer
+          minimum: 0.0
+          title: Expected Version
+        name:
+          type: string
+          maxLength: 100
+          minLength: 1
+          title: Name
+        class_id:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Class Id
+        note:
+          type: string
+          maxLength: 2000
+          title: Note
+          default: ''
+      additionalProperties: false
+      type: object
+      required:
+      - expected_version
+      - name
+      title: CorrectionIn
+    OfflinePage:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/RecognitionRecord'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        page:
+          type: integer
+          title: Page
+        page_size:
+          type: integer
+          title: Page Size
+        categories:
+          items:
+            type: string
+          type: array
+          title: Categories
+      type: object
+      required:
+      - items
+      - total
+      - page
+      - page_size
+      - categories
+      title: OfflinePage
     Action:
       properties:
         title:

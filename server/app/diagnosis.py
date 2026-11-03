@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import time
+import anyio
 from pathlib import Path
 from typing import Literal
 
@@ -15,12 +16,12 @@ from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, StrictBool
 
 from .common import DomainError, require_roles
-from .recognition import RecognitionOut, recognize
+from .recognition import RecognitionOut, UUID7, read_original, infer_original
+from . import diagnosis_records as records
+from .diagnosis_records import Age, Crop, Part, DiagnosisInput
+from .recognition_images import validate_original
 
 router = APIRouter(prefix='/api/v1')
-Crop = Literal['huyou', 'xiangyou', 'citrus']
-Part = Literal['leaf', 'fruit', 'branch']
-Age = Literal['adult', 'young', 'unknown']
 Status = Literal['matched', 'uncertain', 'healthy', 'unmapped', 'conflict', 'unavailable']
 
 
@@ -165,10 +166,68 @@ def advise(payload: Receipt, request: Request) -> Advice:
 async def diagnose(request: Request, image_id: str = Header(alias='X-Image-ID'),
                    crop_id: Crop = 'huyou', part: Part = 'leaf', tree_age: Age = 'unknown',
                    user: dict = Depends(require_roles('collector'))) -> DiagnosisOut:
-    recognition = await recognize(request, image_id, user)
+    work = request.app.state.upload_work
+    with work.admit():
+        data, mime = await read_original(request, image_id)
+        await work.run(validate_original, data, mime)
+        cached = await work.run(records.accept_image, request, image_id, user, data, mime, crop_id, part, tree_age)
+    if cached is not None:
+        recognition = RecognitionOut.model_validate(cached)
+    else:
+        try:
+            recognition = await infer_original(request, image_id, data)
+            await work.run(records.succeed, request, image_id, recognition)
+        except BaseException as exc:
+            code = exc.code if isinstance(exc, DomainError) else 'INFERENCE_FAILED'
+            message = str(exc) if isinstance(exc, DomainError) else '系统识别错误，请稍后重试'
+            with anyio.CancelScope(shield=True):
+                await work.run(records.fail, request, image_id, code, message)
+            raise
     payload = Receipt(user_id=user['user_id'], expires=int(time.time()) + 30 * 86400,
                       recognition=recognition, crop_id=crop_id, part=part, tree_age=tree_age)
     return DiagnosisOut(recognition=recognition, advice=advise(payload, request), receipt=sign(payload, request.app.state.diagnosis_key))
+
+
+class DiagnosisPrepared(BaseModel):
+    record_id: str
+    state: str
+    inference_status: str | None
+    current_name: str
+
+
+@router.put('/diagnoses/{record_id}', tags=['diagnosis'], response_model=DiagnosisPrepared)
+def prepare_diagnosis(record_id: str, body: DiagnosisInput, request: Request,
+                      user: dict = Depends(require_roles('collector'))):
+    if not UUID7.fullmatch(record_id):
+        raise DomainError(422, 'VALIDATION_FAILED', '识别编号必须为UUIDv7')
+    return records.prepare(request.app.state.storage, record_id, user, body)
+
+
+class DiagnosisSnapshot(BaseModel):
+    record_id: str
+    state: str
+    inference_status: str | None
+    current_name: str
+    correction_version: int
+    inference_error: str | None
+    result: DiagnosisOut | None
+
+
+@router.get('/diagnoses/{record_id}', response_model=DiagnosisSnapshot, tags=['diagnosis'])
+def get_diagnosis(record_id: str, request: Request, user: dict = Depends(require_roles('collector'))):
+    with request.app.state.storage.transaction(write=False) as store:
+        row = store.get_offline(record_id)
+        if row is None or row['owner_id'] != user['user_id']:
+            raise DomainError(404, 'NOT_FOUND', '识别记录不存在或不可见')
+        snapshot = {key: row.get(key) for key in ('record_id', 'state', 'inference_status', 'current_name', 'correction_version', 'inference_error')}
+        declaration = dict(row['declaration'])
+    result = None
+    if declaration.get('recognition') and declaration['source'] == 'server':
+        recognition = RecognitionOut.model_validate(declaration['recognition'])
+        payload = Receipt(user_id=user['user_id'], expires=int(time.time()) + 30 * 86400,
+            recognition=recognition, crop_id=declaration['crop_id'], part=declaration['part'], tree_age=declaration['tree_age'])
+        result = DiagnosisOut(recognition=recognition, advice=advise(payload, request), receipt=sign(payload, request.app.state.diagnosis_key))
+    return DiagnosisSnapshot(**snapshot, result=result)
 
 
 @router.post('/diagnoses/advice', response_model=Advice, tags=['diagnosis'])

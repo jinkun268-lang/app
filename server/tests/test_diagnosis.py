@@ -1,4 +1,5 @@
 import json
+import os
 import pytest
 from fastapi.testclient import TestClient
 from server.app.main import create_app
@@ -93,7 +94,9 @@ def test_receipt_signing_key_persists_and_is_private(tmp_path, monkeypatch):
     from server.app.diagnosis import signing_key
     monkeypatch.delenv('APP_DIAGNOSIS_SECRET', raising=False)
     assert signing_key(tmp_path) == signing_key(tmp_path)
-    assert (tmp_path / 'diagnosis-secret').stat().st_mode & 0o777 == 0o600
+    # Windows stat/chmod does not expose POSIX permission bits; retain this check on Unix.
+    if os.name == 'posix':
+        assert (tmp_path / 'diagnosis-secret').stat().st_mode & 0o777 == 0o600
     monkeypatch.setenv('APP_DIAGNOSIS_SECRET', 'short')
     with pytest.raises(RuntimeError): signing_key(tmp_path)
 

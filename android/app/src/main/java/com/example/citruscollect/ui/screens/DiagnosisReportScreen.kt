@@ -17,6 +17,7 @@ import com.example.citruscollect.ui.LocalAppContainer
 import com.example.citruscollect.ui.theme.CitrusColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.firstOrNull
 import java.time.LocalDate
 
 @Composable
@@ -36,6 +37,9 @@ fun DiagnosisReportScreen(id: String, onBack: () -> Unit, onNewPhoto: () -> Unit
     var observation by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
     val record = row
+    LaunchedEffect(id) {
+        if (repo.observe(id).firstOrNull()?.archiveState == "uploaded") repo.syncArchive(id)
+    }
     if (record == null) {
         Column(Modifier.padding(24.dp)) { TextButton(onClick = onBack) { Text("返回") }; Text("正在读取本账号的识别记录…") }
         return
@@ -69,7 +73,10 @@ fun DiagnosisReportScreen(id: String, onBack: () -> Unit, onNewPhoto: () -> Unit
                 Button(onClick = { request(false) }, modifier = Modifier.fillMaxWidth()) { Text(if (record.status == "draft") "发送图片并识别" else "重试识别") }
             }
             result?.recognition?.let { recognition ->
-                Text("识别结果", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                if (record.correctionVersion > 0) {
+                    Text("人工修正：${record.correctedName}", style = MaterialTheme.typography.titleLarge, color = CitrusColors.Green, fontWeight = FontWeight.Bold)
+                }
+                Text(if (record.correctionVersion > 0) "原始识别结果" else "识别结果", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 recognition.candidates.sortedByDescending { it.score }.forEach { candidate ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(candidate.name, modifier = Modifier.weight(1f))
@@ -81,13 +88,22 @@ fun DiagnosisReportScreen(id: String, onBack: () -> Unit, onNewPhoto: () -> Unit
                 if (recognition.warning.isNotBlank()) Text(recognition.warning, style = MaterialTheme.typography.bodySmall, color = CitrusColors.Muted)
             }
         }
+        if (result != null || record.archiveState == "uploaded") AppSection {
+            Text(if (record.archiveState == "uploaded") "图片与识别记录已保存到服务器" else "图片尚未上传完成", style = MaterialTheme.typography.bodyMedium)
+            if (result == null && record.correctionVersion > 0) Text("人工修正：${record.correctedName}", color = CitrusColors.Green)
+            record.archiveError?.let { Text(it, color = CitrusColors.Red, style = MaterialTheme.typography.bodySmall) }
+            TextButton(enabled = record.archiveState != "uploading" && !working, onClick = { container.appScope.launch { repo.syncArchive(id) } }) {
+                Text("刷新识别结果")
+            }
+        }
         result?.advice?.let { advice ->
             AppSection {
                 Text("接下来怎么做", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                if (record.correctionVersion > 0) Text("以下建议基于原始识别，请以人工修正结果为准。", color = CitrusColors.Muted)
                 Text(advice.title, style = MaterialTheme.typography.titleMedium)
                 Text(advice.message, color = CitrusColors.Muted)
                 // 非匹配状态不显示上次的针对性方案。
-                if (advice.status == "matched" && record.status !in setOf("failed", "advice_failed")) {
+                if (record.correctionVersion == 0 && advice.status == "matched" && record.status !in setOf("failed", "advice_failed")) {
                     advice.actions.forEachIndexed { index, action ->
                         Text("${index + 1}. ${action.title}", fontWeight = FontWeight.Bold)
                         Text(action.detail, style = MaterialTheme.typography.bodyMedium)

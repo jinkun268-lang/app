@@ -16,7 +16,9 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import accounts, auth, exports, review, uploads, recognition, collection, diagnosis, phone_auth, training
+from . import accounts, auth, exports, review, uploads, recognition, collection, diagnosis, phone_auth, training, offline_recognition
+from . import diagnosis_records
+from .recognition_events import RecognitionEvents
 from .common import (
     CONTRACT_VERSION,
     DomainError,
@@ -142,6 +144,7 @@ def create_app(
         try:
             # Single API process: interrupted work remains retryable with its original snapshot.
             exports.recover_interrupted(storage)
+            diagnosis_records.recover(storage, file_storage)
             yield
         finally:
             await to_thread.run_sync(export_work.close)
@@ -161,6 +164,7 @@ def create_app(
     application.state.files = file_storage
     application.state.limits = limits
     application.state.upload_work = upload_work
+    application.state.recognition_events = RecognitionEvents()
     application.state.export_work = export_work
     if recognizer is None and detector is None:
         # 配置了 APP_INFERENCE_SOCKET 时走常驻推理服务，否则保持子进程实现。
@@ -188,6 +192,7 @@ def create_app(
     application.include_router(exports.router)
     application.include_router(recognition.router)
     application.include_router(diagnosis.router)
+    application.include_router(offline_recognition.router)
 
     @application.get("/api/v1/health", tags=["health"], response_model=HealthResponse, summary="进程存活")
     def health() -> HealthResponse:
