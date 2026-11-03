@@ -1,6 +1,7 @@
 name: android
 
-# 手动触发或打 tag 时构建 APK，并发布到服务器下载页与 GitHub Release。
+# 手动触发、或 main 上 Android 相关代码变动时构建 APK，
+# 产物发布到服务器下载页与 GitHub Release。
 on:
   workflow_dispatch:
     inputs:
@@ -9,7 +10,10 @@ on:
         required: false
         default: ''
   push:
-    tags: ['v*']
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
 
 concurrency:
   group: android-build
