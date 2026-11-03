@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, StrictBool
 
 from .common import DomainError, require_roles
+from .basic_advice import BASIC_ADVICE, VERSION as BASIC_ADVICE_VERSION
 from .recognition import RecognitionOut, UUID7, read_original, infer_original
 from . import diagnosis_records as records
 from .diagnosis_records import Age, Crop, Part, DiagnosisInput
@@ -133,16 +134,21 @@ def advise(payload: Receipt, request: Request) -> Advice:
         return Advice(status='uncertain', title='暂时无法确定', message='候选结果不够明确，请补拍清晰近照或咨询专业人员，暂不据此处理。')
     if payload.recognition.scope != payload.part:
         return Advice(status='conflict', title='照片部位与模型范围不符', message='请按所选部位重新拍照；当前结果不能提供处理方案。')
+    configured = os.environ.get('APP_DIAGNOSIS_KNOWLEDGE', '')
+    if not configured:
+        if payload.part != 'leaf':
+            return Advice(status='conflict', title='暂无该部位的基础建议', message='当前基础建议适用于柑橘叶片，请补拍叶片或咨询农技人员。')
+        basic = BASIC_ADVICE.get(top.label.strip().lower())
+        if basic is None:
+            return Advice(status='unmapped', title='尚无对应基础建议', message='该识别类别暂无基础建议，请咨询农技人员。')
+        return Advice(**basic, version=BASIC_ADVICE_VERSION)
     if top.class_id is None:
         return Advice(status='unmapped', title='尚无对应资料', message='识别类别尚未映射到经审核的资料，请咨询专业人员。')
     with request.app.state.storage.transaction(write=False) as store:
         row = store.get_class(top.class_id)
         if row is None or not row.get('is_active'):
             return Advice(status='unmapped', title='类别已停用', message='当前类别已不可用，请重新识别或咨询专业人员。')
-    configured = os.environ.get('APP_DIAGNOSIS_KNOWLEDGE', '')
     try:
-        if not configured:
-            raise ValueError('not configured')
         path = Path(configured)
         if path.stat().st_size > 2 * 1024 * 1024:
             raise ValueError('too large')
