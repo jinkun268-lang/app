@@ -175,6 +175,7 @@ http {
         image/svg+xml svg;
         image/x-icon ico;
         font/woff2 woff2;
+        application/vnd.android.package-archive apk;
     }
     default_type application/octet-stream;
     sendfile on;
