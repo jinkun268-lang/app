@@ -62,16 +62,15 @@ jobs:
           { echo "APP_CODE=$CODE"; echo "APP_NAME=$NAME"; } >> "$GITHUB_ENV"
           echo "versionCode=$CODE  versionName=$NAME"
 
-      - name: 单元测试（结果单独可见，不阻断出包）
+      - name: 单元测试
         id: unit_test
-        continue-on-error: true
         run: |
           cd android
           ./gradlew --no-daemon :app:testDebugUnitTest \
             -PappVersionCode="$APP_CODE" -PappVersionName="$APP_NAME"
 
       - name: 打印失败的测试断言
-        if: steps.unit_test.outcome == 'failure'
+        if: failure()
         run: |
           DIR=android/app/build/test-results/testDebugUnitTest
           echo "=== 汇总 ==="
