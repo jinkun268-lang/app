@@ -30,11 +30,11 @@ class UploadOrchestratorTest {
     @Before
     fun setUp() {
         server = MockWebServer()
-        // 显式绑定 IPv4 回环：CI 上 localhost 优先解析为 ::1，与 MockWebServer 的绑定地址
-        // 不一致会让首次连接被拒，导致按请求次数断言的用例少记一次。
+        // 绑定与 baseUrl 都用手写字面量 IPv4：CI 上 localhost 可能解析为 ::1，而服务端只监听
+        // 127.0.0.1，二者不一致会让首次连接被拒，导致按请求次数断言的用例少记一次。
         server.start(InetAddress.getByName("127.0.0.1"), 0)
         val retrofit = Retrofit.Builder()
-            .baseUrl(server.url("/"))
+            .baseUrl("http://127.0.0.1:${server.port}/")
             .client(OkHttpClient.Builder().retryOnConnectionFailure(false).build())
             .addConverterFactory(CitrusJson.asConverterFactory("application/json".toMediaType()))
             .build()
