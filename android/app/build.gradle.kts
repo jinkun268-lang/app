@@ -70,6 +70,12 @@ android {
     }
 }
 
+// 单元测试统一走 IPv4 回环：CI(Linux) 上 localhost 可能优先解析为 ::1，
+// 而 MockWebServer 监听的是 127.0.0.1，二者不一致会让连接被拒并打乱按请求次数的断言。
+tasks.withType<Test>().configureEach {
+    systemProperty("java.net.preferIPv4Stack", "true")
+}
+
 dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation(libs.androidx.core.ktx)
