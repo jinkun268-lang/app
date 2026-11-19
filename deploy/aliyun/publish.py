@@ -1,168 +1,189 @@
 #!/usr/bin/python3 -I
-"""Deploy an Actions release into the Citrus Ubuntu RootDirectory on the ECS host."""
+"""Run the repository's original production publisher inside the ECS Ubuntu root."""
+import contextlib
 import fcntl
-import filecmp
+import io
 import json
 import os
 import pwd
 import re
 import shutil
-import socket
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
-import time
 import urllib.request
 from pathlib import Path, PurePosixPath
 
-GUEST = Path('/opt/citrus-runtime/rootfs')
-APP = GUEST / 'opt/citrus-app'
-RELEASES = APP / 'releases'
-ACTIVE = APP / 'current'
-BACKUPS = Path('/var/backups/citrus-app')
-SOCKET = '/run/citrus-inference/inference.sock'
+ROOT = Path('/opt/citrus-runtime/rootfs')
+APP = ROOT / 'opt/citrus-app'
+STAGE = Path('/root/cache/citrus-publish')
+REPO = 'jinkun268-lang/app'
+API = 'https://api.github.com/repos/' + REPO
+LIVE_DB = 'citrus_app'
+BACKUPS = '/var/backups/citrus-app'
 
 
-def guest_path(path):
-    return '/' + str(path.relative_to(GUEST))
+def github_json(url):
+    with urllib.request.urlopen(url, timeout=25) as response:
+        return json.load(response)
 
 
-def switch(link):
-    temp = APP / '.current.publish-next'
-    if temp.is_symlink():
-        temp.unlink()
-    temp.symlink_to(link)
-    os.replace(str(temp), str(ACTIVE))
+def main_commit(short):
+    sha = github_json(API + '/commits/' + short)['sha']
+    if not re.fullmatch('[a-f0-9]{40}', sha) or not sha.startswith(short):
+        raise ValueError('Release commit mismatch')
+    comparison = github_json(API + '/compare/' + sha + '...main')
+    if comparison['status'] not in ('identical', 'ahead'):
+        raise ValueError('Release commit is outside production main history')
+    return sha
 
 
-def unpack(upload, release):
-    with tarfile.open(fileobj=upload, mode='r|gz') as archive:
-        for member in archive:
-            name = PurePosixPath(member.name)
-            if name.is_absolute() or '..' in name.parts or '.api-env' in name.parts:
-                raise ValueError('Invalid release path')
-            path = release.joinpath(*name.parts)
-            if member.isdir():
-                path.mkdir(parents=True, exist_ok=True)
-            elif member.isreg() and name.parts:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                with archive.extractfile(member) as source, path.open('xb') as dest:
-                    shutil.copyfileobj(source, dest)
-                path.chmod(0o755 if member.mode & 0o111 else 0o644)
-            else:
-                raise ValueError('Release contains an unsupported file type')
-    for filename in ('server/app/main.py', 'server/requirements.txt', 'admin/dist/index.html'):
-        if not (release / filename).is_file():
-            raise ValueError('Incomplete release: ' + filename)
+@contextlib.contextmanager
+def upload(path):
+    fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as f:
+        info = os.fstat(f.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != pwd.getpwnam('deploy').pw_uid:
+            raise ValueError('Expected a regular CI upload')
+        yield f
 
 
-def prepare_environment(release, previous):
-    requirements = release / 'server/requirements.txt'
-    if filecmp.cmp(str(requirements), str(previous / 'server/requirements.txt'), shallow=False):
-        return os.readlink(str(previous / '.api-env'))
-    envs = APP / 'release-envs'
-    envs.mkdir(exist_ok=True)
-    env = Path(tempfile.mkdtemp(prefix='api-', dir=str(envs)))
-    builder = pwd.getpwnam('citrusbuild')
-    os.chown(str(env), builder.pw_uid, builder.pw_gid)
-    env.chmod(0o755)
-    venv = guest_path(env)
-    ctx = ['systemd-run', '--quiet', '--wait', '--pipe', '-p', 'RootDirectory=' + str(GUEST),
-           '-p', 'User=citrusbuild', '-p', 'Group=citrusbuild', '-p', 'MountAPIVFS=yes',
-           '-p', 'PrivateTmp=yes', '-p', 'NoNewPrivileges=yes', '-p', 'ProtectSystem=strict',
-           '-p', 'ReadWritePaths=+' + venv, '/usr/bin/env', 'HOME=/nonexistent',
-           'PYTHONNOUSERSITE=1', 'PIP_NO_CACHE_DIR=1']
-    subprocess.run(ctx + ['/usr/bin/python3', '-m', 'venv', venv], check=True)
-    subprocess.run(ctx + [venv + '/bin/python', '-m', 'pip', 'install', '-r', guest_path(requirements)], check=True)
-    subprocess.run(ctx + [venv + '/bin/python', '-m', 'pip', 'check'], check=True)
-    return venv
+def release_bundle(work, sha, tag, uploaded):
+    # Privileged release logic comes from the selected repository commit. CI supplies
+    # only the built, publicly served frontend and a matching copy of the publisher.
+    archive = work / 'source.tar.gz'
+    with urllib.request.urlopen('https://codeload.github.com/' + REPO + '/tar.gz/' + sha, timeout=60) as src, archive.open('wb') as f:
+        shutil.copyfileobj(src, f)
+    paths = set()
+    script = None
+    frontend = set()
+    with tarfile.open(str(work / ('release-' + tag + '.tar.gz')), 'w:gz') as out:
+        for code, stream in ((True, archive.open('rb')), (False, uploaded)):
+            with stream, tarfile.open(fileobj=stream, mode='r|gz') as source:
+                for item in source:
+                    path = PurePosixPath(item.name)
+                    if path.is_absolute() or '..' in path.parts:
+                        raise ValueError('Unsafe archive path')
+                    parts = path.parts[1:] if code else path.parts
+                    if not parts or item.isdir():
+                        continue
+                    name = '/'.join(parts)
+                    asset = name.startswith('admin/dist/')
+                    if code == asset:
+                        continue
+                    if not item.isreg() or name in paths:
+                        raise ValueError('Unsupported or duplicate release member')
+                    paths.add(name)
+                    target = tarfile.TarInfo(name)
+                    target.size = item.size
+                    target.mode = 0o755 if code and item.mode & 0o111 else 0o644
+                    target.mtime = item.mtime
+                    with source.extractfile(item) as data:
+                        if code and name == 'deploy/publish.sh':
+                            script = data.read()
+                            out.addfile(target, io.BytesIO(script))
+                        else:
+                            out.addfile(target, data)
+                    if asset:
+                        frontend.add(name)
+    if 'admin/dist/index.html' not in frontend or not any(n.startswith('admin/dist/assets/') for n in frontend):
+        raise ValueError('Missing compiled admin frontend')
+    if not script or 'server/app/main.py' not in paths or 'deploy/nginx/render.py' not in paths:
+        raise ValueError('Incomplete repository release')
+    with upload('/tmp/publish.sh.new') as f:
+        if f.read(len(script) + 1) != script:
+            raise ValueError('Publisher upload differs from the repository commit')
+    (work / 'publish.sh.new').write_bytes(script)
 
 
-def backup_database(tag, stamp):
-    BACKUPS.mkdir(mode=0o700, exist_ok=True)
-    env = (GUEST / 'etc/citrus-app/app.env').read_text().splitlines()
-    urls = [line.partition('=')[2] for line in env if line.startswith('APP_DATABASE_URL=')]
-    if len(urls) != 1 or urls[0].rsplit('/', 1)[-1] != 'citrus_production':
-        raise RuntimeError('Live database does not match the deployment backup target')
-    name = BACKUPS / ('pre-' + tag + '-' + stamp + '.dump')
-    with tempfile.NamedTemporaryFile(dir=str(BACKUPS), delete=False) as f:
-        pending = Path(f.name)
-        try:
-            subprocess.run(['chroot', '--userspec=citruspg:citruspg', str(GUEST),
-                            '/usr/bin/pg_dump', '-Fc', '-h', '/var/lib/postgresql/citrus-socket',
-                            'citrus_production'], stdout=f, check=True)
-            if f.tell() < 5:
-                raise RuntimeError('Empty database dump')
-        except BaseException:
-            pending.unlink()
-            raise
-    os.replace(str(pending), str(name))
-    print('Backed up citrus_production: ' + name.name, flush=True)
-
-
-def restart_and_check():
-    subprocess.run(['systemctl', 'restart', 'citrus-inference', 'citrus-app'], check=True)
-    deadline = time.monotonic() + 100
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen('http://127.0.0.1:18081/api/v1/health/ready', timeout=3) as r:
-                if r.status != 200:
-                    raise ValueError('API not ready')
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
-                probe.settimeout(3)
-                probe.connect(SOCKET)
-                probe.sendall(b'{"op":"health"}\n')
-                with probe.makefile('rb') as f:
-                    health = json.loads(f.readline(16384))
-                if all(health.get(k) for k in ('ok', 'ready', 'classifier', 'detector')):
-                    return
-        except (OSError, ValueError):
-            pass
-        time.sleep(1)
-    raise RuntimeError('API or inference service did not become ready')
-
-
-def publish(archive, tag):
-    previous_link = os.readlink(str(ACTIVE))
-    if not re.fullmatch(r'/opt/citrus-app/releases/[A-Za-z0-9_-]+', previous_link):
-        raise ValueError('Unexpected current release target')
-    previous = GUEST / previous_link.lstrip('/')
-    stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    release = Path(tempfile.mkdtemp(prefix=tag + '-' + stamp + '-', dir=str(RELEASES)))
-    release.chmod(0o755)
-    with os.fdopen(os.open(archive, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as f:
-        attr = os.fstat(f.fileno())
-        if not stat.S_ISREG(attr.st_mode) or attr.st_uid != pwd.getpwnam('deploy').pw_uid:
-            raise ValueError('Release upload has unexpected owner or type')
-        unpack(f, release)
-    (release / '.api-env').symlink_to(prepare_environment(release, previous))
-    backup_database(tag, stamp)
-    switch(guest_path(release))
+def signed_release(work, tag, archive_path):
+    name = 'release-' + tag + '.tar.gz'
     try:
-        restart_and_check()
-    except BaseException:
-        switch(previous_link)
-        print("Release failed; restored " + previous.name, flush=True)
-        restart_and_check()
-        raise
-    print('Published {} to {}. API, gateway and both models ready.'.format(tag, release.name), flush=True)
-    # Retain the current and previous managed releases even if the system clock changes.
-    active_set = {release, previous}
-    owned = sorted((p for p in RELEASES.iterdir() if re.fullmatch(r'[a-f0-9]{12}-\d{8}T\d{6}Z-[a-z0-9_]+', p.name)
-                    and p.is_dir() and not p.is_symlink()), key=lambda p:p.stat().st_mtime, reverse=True)
-    for retired in owned[5:]:
-        if retired not in active_set:
-            shutil.rmtree(str(retired))
-    for retired in sorted(BACKUPS.glob('pre-*-*.dump'), key=lambda p:p.stat().st_mtime, reverse=True)[10:]:
-        if retired.is_file() and not retired.is_symlink():
-            retired.unlink()
+        with upload(str(archive_path) + '.sig') as f:
+            signature = f.read(16385)
+    except FileNotFoundError:
+        return False
+    if not signature or len(signature) > 16384:
+        raise ValueError('Invalid release signature')
+    (work / (name + '.sig')).write_bytes(signature)
+    with upload(archive_path) as src, (work / name).open('xb') as dest:
+        shutil.copyfileobj(src, dest)
+    verify = ['systemd-run', '--quiet', '--wait', '--pipe', '-p', 'RootDirectory=' + str(ROOT),
+              '-p', 'MountAPIVFS=yes', '-p', 'BindReadOnlyPaths=' + str(work) + ':/tmp',
+              '/usr/bin/ssh-keygen', '-Y', 'verify', '-f', '/opt/citrus-app/host-tools/allowed-signers',
+              '-I', 'github-actions', '-n', 'citrus-release-' + tag, '-s', '/tmp/' + name + '.sig']
+    with (work / name).open('rb') as package:
+        subprocess.run(verify, stdin=package, check=True)
+    publisher = None
+    with tarfile.open(str(work / name), 'r:gz') as archive:
+        for item in archive:
+            path = PurePosixPath(item.name)
+            if path.is_absolute() or '..' in path.parts or not (item.isdir() or item.isreg()):
+                raise ValueError('Unsupported release archive member')
+            if path.as_posix() == 'deploy/publish.sh':
+                with archive.extractfile(item) as script:
+                    publisher = script.read()
+    if not publisher:
+        raise ValueError('Missing publisher in signed release')
+    with upload('/tmp/publish.sh.new') as script:
+        if script.read(len(publisher) + 1) != publisher:
+            raise ValueError('Publisher differs from signed release')
+    (work / 'publish.sh.new').write_bytes(publisher)
+    print('Verified the CI-uploaded archive locally.', flush=True)
+    return True
+
+
+def guest(work, command):
+    args = ['systemd-run', '--quiet', '--wait', '--pipe',
+            '-p', 'RootDirectory=' + str(ROOT), '-p', 'MountAPIVFS=yes',
+            '-p', 'BindPaths=' + str(work) + ':/tmp',
+            '-p', 'BindPaths=' + BACKUPS, '-p', 'BindReadOnlyPaths=/run/systemd/system',
+            '-p', 'BindPaths=/run/systemd/private',
+            '/usr/bin/env', 'SYSTEMD_IGNORE_CHROOT=1', 'SYSTEMD_OFFLINE=0',
+            'PATH=/opt/citrus-app/host-tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+            'DB_NAME=' + LIVE_DB]
+    subprocess.run(args + command, check=True)
+
+
+def publish(tag, upload_path):
+    if not re.fullmatch('[a-f0-9]{12}', tag) or str(upload_path) != '/tmp/release-' + tag + '.tar.gz':
+        raise ValueError('Expected matching CI commit and archive path')
+    STAGE.mkdir(mode=0o700, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=str(STAGE)) as temp:
+        work = Path(temp)
+        if not signed_release(work, tag, upload_path):
+            # Compatibility for already deployed, unsigned versions of the workflow.
+            sha = main_commit(tag)
+            with upload(upload_path) as f:
+                release_bundle(work, sha, tag, f)
+        current = os.readlink(str(APP / 'current'))
+        if current == '/opt/citrus-app/releases/' + tag:
+            # The old publisher reuses the tag directory. Keep a runnable previous
+            # version when Actions retries the same commit.
+            releases = APP / 'releases'
+            safe = Path(tempfile.mkdtemp(prefix=tag + '-previous-', dir=str(releases)))
+            subprocess.run(['cp', '-a', '--link', str(releases / tag) + '/.', str(safe)], check=True)
+            safe.chmod(0o755)
+            link = APP / ('.current-retry-' + safe.name)
+            link.symlink_to('/opt/citrus-app/releases/' + safe.name)
+            os.replace(str(link), str(APP / 'current'))
+            try:
+                guest(work, ['/opt/citrus-app/render-gateway.sh'])
+                subprocess.run(['systemctl', 'reload-or-restart', 'citrus-app', 'citrus-inference'], check=True)
+            except BaseException:
+                link.symlink_to(current)
+                os.replace(str(link), str(APP / 'current'))
+                guest(work, ['/opt/citrus-app/render-gateway.sh'])
+                subprocess.run(['systemctl', 'reload-or-restart', 'citrus-app', 'citrus-inference'], check=True)
+                raise
+        guest(work, ['/bin/bash', '/opt/citrus-app/publish.sh', str(upload_path), tag])
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 3 or not re.fullmatch(r'[a-f0-9]{12}', sys.argv[2]) or sys.argv[1] != '/tmp/release-' + sys.argv[2] + '.tar.gz':
-        sys.exit('Expected /tmp/release-<12-hex-commit>.tar.gz and matching commit')
-    with open('/opt/citrus-app/.publish.lock','a') as lock:
+    if len(sys.argv) != 3:
+        sys.exit('Expected an Actions archive and commit')
+    with open('/opt/citrus-app/.publish.lock', 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        publish(sys.argv[1], sys.argv[2])
+        publish(sys.argv[2], sys.argv[1])

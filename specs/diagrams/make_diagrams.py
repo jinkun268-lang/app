@@ -356,9 +356,9 @@ def deployment() -> Path:
         FILL_SRV, EDGE_SRV, size=19)
     box(d, 1030, 460, 660, 76, ["推理守护进程（citrus-inference）", "/run/citrus-inference/inference.sock"],
         FILL_OK, EDGE_OK, size=19, badge="已上线", badge_edge=EDGE_OK)
-    box(d, 700, 640, 380, 88, ["PostgreSQL 14", "127.0.0.1:5432 · citrus_production"], FILL_TRAIN, EDGE_TRAIN, size=19)
+    box(d, 700, 640, 380, 88, ["PostgreSQL 14", "127.0.0.1:5432 · citrus_app"], FILL_TRAIN, EDGE_TRAIN, size=19)
     box(d, 1290, 640, 420, 88, ["文件目录 /var/lib/citrus-app", "原图 · 预览 · 导出 ZIP"], FILL_TRAIN, EDGE_TRAIN, size=19)
-    box(d, 1030, 745, 820, 56, ["证书由 citrus-certbot.timer 续期 · 发布前备份生产库，健康检查失败自动回滚"],
+    box(d, 1030, 745, 820, 56, ["certbot.timer 续期 · 发版备份生产库、校验并热重载网关，API 健康失败回滚"],
         (247, 251, 248), EDGE_OK, size=18)
 
     ortho(d, [(210, 230), (210, 310)], "HTTPS", at=(300, 270))

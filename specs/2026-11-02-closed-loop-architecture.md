@@ -179,9 +179,9 @@ sequenceDiagram
 | Nginx 网关 | systemd `citrus-gateway` | 80（ACME + 308）、443 |
 | API | systemd `citrus-app`（uvicorn 单进程） | 127.0.0.1:18080 |
 | 推理守护 | systemd `citrus-inference` | `/run/citrus-inference/inference.sock` |
-| 数据库 | PostgreSQL 14 | 127.0.0.1:5432，生产库 `citrus_production` |
+| 数据库 | PostgreSQL 14 | 127.0.0.1:5432，生产库 `citrus_app` |
 | 文件 | `/var/lib/citrus-app`（可换 OSS） | 原图 / 预览 / ZIP |
-| 发布 | GitHub Actions → `publish.sh` | 每次发布生成独立目录，原子切换 current，健康检查失败回滚 |
+| 发布 | GitHub Actions → `publish.sh` | releases/<sha>、SQL 备份、网关生成校验与热重载，API 健康失败自动回滚 |
 
 ## 12. 存储与合规
 

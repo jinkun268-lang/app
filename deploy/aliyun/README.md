@@ -1,25 +1,29 @@
 # 阿里云生产发布
 
-生产域名为 `api.homemanager.com.cn`，SSH 发布目标为 `47.87.69.34:22`。服务端和 Android 工作流共用仓库的 `SSH_HOST`、`SSH_USER`（`deploy`）及 `SSH_KEY`。Android 客户端使用正式域名。旧网关保留转发时，新网关需要信任旧网关的真实来源地址。
+生产域名为 `api.homemanager.com.cn`，发布目标为 `47.87.69.34:22`。API、模型、Nginx 和 PostgreSQL 14 在宿主管理的 Ubuntu 环境中运行。业务路径相对于 `/opt/citrus-runtime/rootfs`。生产库名为 `citrus_app`。
 
-## 服务端
+## 服务端发布
 
-宿主机 `/opt/citrus-app/publish.sh` 安装自本目录的 `publish.py`。`/usr/local/libexec/citrus-ci-ssh` 安装自 `ci-ssh.py`。这两个文件由 root 管理。发布用户的 SSH 公钥使用 OpenSSH 的 `restrict` 和固定命令，允许工作流所需的 SFTP、版本发布和 APK 发布。工作流上传的 `/tmp/publish.sh.new` 随该次上传包一并清理。修改宿主机发布程序时，管理员需从审核后的源文件重新安装。
+工作流经原有 SSH 发布账号上传源码、构建好的管理端及 `deploy/publish.sh`。宿主机的 `/opt/citrus-app/publish.sh` 是本目录的 `publish.py`，负责衔接 Ubuntu 文件路径、宿主 systemd 和发布输入。工作流以现有 CI 密钥为上传包签名，宿主在本地验证签名及包内发布脚本。未携带签名的旧工作流使用公开仓库相应 main 历史提交的源码与已上传的前端产物，需要目标机能访问 GitHub。
 
-生产运行环境位于宿主机 `/opt/citrus-runtime/rootfs`。发布程序在其中创建独立版本目录，以单独的系统账号准备发生变化的 Python 依赖，在宿主机 `/var/backups/citrus-app/` 备份实际生产库 `citrus_production`，再原子切换 `/opt/citrus-app/current`。API 与推理服务重启后，发布程序必须通过网关读到就绪接口，并确认推理套接字已加载分类及检测模型。失败时恢复之前的版本及其 Python 环境。
+Ubuntu 环境内实际运行仓库的 [原版发布脚本](../publish.sh)。它自更新为本次提交的脚本，解包至 `/opt/citrus-app/releases/<提交短号>`，依赖变化时更新共享虚拟环境，备份生产库，然后切换 `current`。重复发布正在运行的同一提交时，宿主入口先保留上一份可运行目录，用于失败回退。
 
-网关直接从 `current/admin/dist` 提供前端。TLS、可信转发来源及限流配置位于运行环境的 `/var/lib/citrus-gateway/nginx.conf`，由宿主管理员维护。重复发布同一提交会构建独立目录，保留可回退版本。脚本保留最近五个自动发布目录，保留当前版本及前一版本，生产库的发布前备份保留最近十份。
+发布前备份位于宿主机 `/var/backups/citrus-app/pre-*.sql.gz`，沿用 `pg_dump | gzip` 和原保留规则。私有 PATH 中的 `pg-backup-adapter.sh` 将旧机的本地管理命令映射到新机 PostgreSQL 套接字与管理账号。API 健康检查使用 `127.0.0.1:18080/api/v1/health/ready`，失败时原脚本恢复前一版本并重启 API。推理服务沿用原版发版判定，默认 2 线程。
 
-## Android
+## 网关与证书
 
-工作流上传版本 APK 及 latest APK 到宿主机的 `/opt/citrus-app/downloads/` 暂存目录。现有工作流随后通过 SSH 查看下载目录。受限 SSH 入口在此步骤检查版本包的 Android 清单和 dex 条目并原子更新公开文件。两个下载名使用同一个已完成的版本包。正式下载入口为 [最新 APK](https://api.homemanager.com.cn/downloads/citrus-collect-latest.apk)。
+每次发版从 `current/deploy/nginx/render.py` 生成公网 80、443 和本机 18081 三个入口。新机的 `render-gateway.sh` 通过实际 Nginx 执行 `nginx -t` 后，备份当前配置、安装候选配置并热重载 `citrus-gateway`。前端根解析到本次发布目录。旧机继续转发期间保留其可信来源地址。证书引用 `/etc/letsencrypt/live/`，以便续期钩子重载后读取新证书。
 
-## 现场核对
+网关生成或校验失败时由原发布脚本记录错误，随后按 API 健康检查判定本次应用发布结果。已安装新配置后若 reload 失败，可使用同目录 `nginx.conf.bak-*` 排查或恢复。证书采用原 `certbot.timer` 调度及 `certbot -q renew`；成功续期后由标准 deploy hook 重载网关。
 
-以下命令在新机宿主运行。
+## Android 与容量
+
+CI 直接将版本 APK 和 latest APK 上传到公开下载目录。宿主的 `/opt/citrus-app/downloads/` 指向 Ubuntu 环境内同名目录，版本文件与 latest 各自独立。[最新 APK](https://api.homemanager.com.cn/downloads/citrus-collect-latest.apk)
+
+新机物理内存 896 MiB。PostgreSQL 当前使用 35 个连接上限、32 MiB shared buffers、2 MiB work mem 和 24 MiB maintenance work mem。数据库名、SQL 备份及应用数据使用旧机约定。
 
 ```sh
 readlink /opt/citrus-runtime/rootfs/opt/citrus-app/current
-systemctl is-active citrus-app citrus-inference citrus-postgresql citrus-gateway
+systemctl is-active citrus-app citrus-inference citrus-postgresql citrus-gateway certbot.timer
 curl -fsS https://api.homemanager.com.cn/api/v1/health/ready
 ```
