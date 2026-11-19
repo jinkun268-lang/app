@@ -160,11 +160,17 @@ def prepare(archive_path, tag, work):
             script = supplied.read()
     except FileNotFoundError:
         script = None
-    same = all(fields.get(f) == (TRUSTED / f).read_bytes() for f in PRIVILEGED)
-    same = same and (APP / 'publish.sh').read_bytes() == (TRUSTED / PUBLISHER).read_bytes()
-    if same:
+    established = (TRUSTED / PUBLISHER).read_bytes()
+    def absent(path):
+        return path not in seen and all(
+            str(parent) not in seen or seen[str(parent)].isdir()
+            for parent in PurePosixPath(path).parents)
+    same = (APP / 'publish.sh').read_bytes() == established and script in (None, established)
+    same = same and (absent(RENDERER) or fields.get(RENDERER) == (TRUSTED / RENDERER).read_bytes())
+    if same and not absent(REQUIREMENTS):
         lock = APP / '.requirements.sha256'
-        same = lock.is_file() and lock.read_text().strip() == hashlib.sha256(fields[REQUIREMENTS]).hexdigest()
+        requirements = fields.get(REQUIREMENTS)
+        same = requirements is not None and lock.is_file() and lock.read_text().strip() == hashlib.sha256(requirements).hexdigest()
     if same:
         os.replace(str(original), str(work / name))
         print('Using the uploaded release directly.', flush=True)
@@ -174,7 +180,7 @@ def prepare(archive_path, tag, work):
             raise ValueError('Uploaded privileged components differ from the repository')
         print('Privileged release update confirmed against repository source.', flush=True)
     if script is not None:
-        if script != fields.get(PUBLISHER):
+        if not same and script != fields.get(PUBLISHER):
             raise ValueError('Publisher and release disagree')
         (work / 'publish.sh.new').write_bytes(script)
     return name
