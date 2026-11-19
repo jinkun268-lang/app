@@ -339,15 +339,15 @@ def deployment() -> Path:
     img = Image.new("RGB", (W, H), WHITE)
     d = ImageDraw.Draw(img)
     d.text((W / 2, 36), "部署架构", font=font(34, True), fill=INK, anchor="mm")
-    d.text((W / 2, 74), "单台阿里云香港 ECS：systemd 管三个服务，数据库只监听回环，发布由 GitHub Actions 触发",
+    d.text((W / 2, 74), "阿里云 ECS 运行 API、推理、网关和数据库，GitHub Actions 发布应用与 APK",
            font=font(18), fill=MUTED, anchor="mm")
 
     box(d, 210, 180, 300, 100, ["农民手机 App", "农业局浏览器"], FILL_APP, EDGE_APP, size=20)
-    box(d, 210, 360, 300, 100, ["Cloudflare", "DNS + 代理 + 缓存"], (245, 247, 250), (120, 130, 145), size=20)
+    box(d, 210, 360, 300, 100, ["Cloudflare", "权威 DNS"], (245, 247, 250), (120, 130, 145), size=20)
     box(d, 210, 640, 300, 100, ["GitHub 仓库", "Actions：CI + 部署"], (240, 240, 245), (110, 118, 130), size=20)
 
     d.rounded_rectangle([430, 130, 1590, 820], radius=18, outline=EDGE_SRV, width=2, fill=(250, 253, 251))
-    d.text((452, 146), "阿里云香港 ECS · 8.217.13.178 · 2 vCPU / 7.6GB / 40GB", font=font(20, True),
+    d.text((452, 146), "阿里云 ECS · 47.87.69.34 · 2 vCPU / 896 MiB / 30 GiB", font=font(20, True),
            fill=EDGE_SRV, anchor="la")
 
     box(d, 1030, 240, 820, 76, ["Nginx 网关（citrus-gateway）", ":80 ACME + 308 · :443 TLS · 限流 · gzip · 媒体缓存"],
@@ -356,13 +356,13 @@ def deployment() -> Path:
         FILL_SRV, EDGE_SRV, size=19)
     box(d, 1030, 460, 660, 76, ["推理守护进程（citrus-inference）", "/run/citrus-inference/inference.sock"],
         FILL_OK, EDGE_OK, size=19, badge="已上线", badge_edge=EDGE_OK)
-    box(d, 700, 640, 380, 88, ["PostgreSQL 14", "127.0.0.1:5432 · citrus_app"], FILL_TRAIN, EDGE_TRAIN, size=19)
+    box(d, 700, 640, 380, 88, ["PostgreSQL 14", "127.0.0.1:5432 · citrus_production"], FILL_TRAIN, EDGE_TRAIN, size=19)
     box(d, 1290, 640, 420, 88, ["文件目录 /var/lib/citrus-app", "原图 · 预览 · 导出 ZIP"], FILL_TRAIN, EDGE_TRAIN, size=19)
-    box(d, 1030, 745, 820, 56, ["证书 Let's Encrypt（certbot.timer 自动续期）· 发布由 publish.sh 执行，健康检查失败自动回滚"],
+    box(d, 1030, 745, 820, 56, ["证书由 citrus-certbot.timer 续期 · 发布前备份生产库，健康检查失败自动回滚"],
         (247, 251, 248), EDGE_OK, size=18)
 
     ortho(d, [(210, 230), (210, 310)], "HTTPS", at=(300, 270))
-    ortho(d, [(360, 360), (430, 360), (430, 240), (620, 240)], "TLS 回源 443", at=(500, 300))
+    ortho(d, [(360, 360), (430, 360), (430, 240), (620, 240)], "HTTPS 443", at=(500, 300))
     ortho(d, [(1030, 388), (1030, 422)], "本地 socket", at=(1130, 405))
     ortho(d, [(620, 350), (560, 350), (560, 596)], "落库", at=(516, 470))
     ortho(d, [(1440, 350), (1500, 350), (1500, 560), (1300, 560), (1300, 596)], "原图 / 预览", at=(1412, 540))

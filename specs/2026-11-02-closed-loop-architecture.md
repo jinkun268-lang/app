@@ -172,14 +172,16 @@ sequenceDiagram
 
 ![部署架构](diagrams/deployment.png)
 
+2026-11-19，生产入口已切至 `47.87.69.34`。客户端继续使用 `https://api.homemanager.com.cn`。API、模型和数据库在宿主 systemd 管理的 Ubuntu 运行环境中执行。[阿里云发布说明](../deploy/aliyun/README.md)
+
 | 组件 | 形态 | 端口 / 路径 |
 | --- | --- | --- |
 | Nginx 网关 | systemd `citrus-gateway` | 80（ACME + 308）、443 |
 | API | systemd `citrus-app`（uvicorn 单进程） | 127.0.0.1:18080 |
 | 推理守护 | systemd `citrus-inference` | `/run/citrus-inference/inference.sock` |
-| 数据库 | PostgreSQL 14 | 127.0.0.1:5432 |
+| 数据库 | PostgreSQL 14 | 127.0.0.1:5432，生产库 `citrus_production` |
 | 文件 | `/var/lib/citrus-app`（可换 OSS） | 原图 / 预览 / ZIP |
-| 发布 | GitHub Actions → `publish.sh` | releases/<sha> + 软链，失败自动回滚 |
+| 发布 | GitHub Actions → `publish.sh` | 每次发布生成独立目录，原子切换 current，健康检查失败回滚 |
 
 ## 12. 存储与合规
 
