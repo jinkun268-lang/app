@@ -53,7 +53,8 @@ jobs:
           printf '%s\n' "${{ secrets.SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          scp -P "$SSH_PORT" -i ~/.ssh/id_ed25519 "/tmp/release-$TAG.tar.gz" "$SSH_USER@$SSH_HOST:/tmp/"
+          ssh-keygen -Y sign -f ~/.ssh/id_ed25519 -n "citrus-release-$TAG" "/tmp/release-$TAG.tar.gz"
+          scp -P "$SSH_PORT" -i ~/.ssh/id_ed25519 "/tmp/release-$TAG.tar.gz" "/tmp/release-$TAG.tar.gz.sig" "$SSH_USER@$SSH_HOST:/tmp/"
           # 发布脚本随仓库版本走：放到约定位置，由 publish.sh 自身（root）安装，不额外申请 sudo 权限。
           scp -P "$SSH_PORT" -i ~/.ssh/id_ed25519 deploy/publish.sh "$SSH_USER@$SSH_HOST:/tmp/publish.sh.new"
           ssh -p "$SSH_PORT" -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
