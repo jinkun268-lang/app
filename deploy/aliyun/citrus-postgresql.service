@@ -1,0 +1,20 @@
+[Unit]
+Description=PostgreSQL Cluster 14/main
+After=network.target
+RequiresMountsFor=/opt/citrus-runtime/rootfs /var/log/postgresql
+[Service]
+Type=forking
+RootDirectory=/opt/citrus-runtime/rootfs
+MountAPIVFS=yes
+BindPaths=/run/postgresql /var/log/postgresql
+ExecStart=-/usr/bin/pg_ctlcluster --skip-systemctl-redirect 14-main start
+TimeoutStartSec=0
+ExecStop=/usr/bin/pg_ctlcluster --skip-systemctl-redirect -m fast 14-main stop
+TimeoutStopSec=1h
+ExecReload=/usr/bin/pg_ctlcluster --skip-systemctl-redirect 14-main reload
+PIDFile=/run/postgresql/14-main.pid
+SyslogIdentifier=postgresql@14-main
+OOMScoreAdjust=-900
+Restart=no
+[Install]
+WantedBy=multi-user.target
